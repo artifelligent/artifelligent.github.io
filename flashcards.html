@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flashcard App (Text Only)</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#4a90e2"> 
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .list-item:nth-child(odd) { background-color: #f9fafb; }
+        .list-item:nth-child(even) { background-color: #ffffff; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-center mb-8">Flashcard App (Text Only)</h1>
+
+        <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+             <h2 class="text-xl font-semibold mb-4">Create New Flashcard</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="space-y-4">
+                    <h3 class="font-medium">Front Side</h3>
+                    <div>
+                        <label for="frontText" class="block text-sm font-medium text-gray-700 mb-1">Text</label>
+                        <textarea id="frontText" class="w-full border border-gray-300 rounded-md p-2 h-32" aria-label="Front side text"></textarea>
+                    </div>
+                </div>
+                <div class="space-y-4">
+                    <h3 class="font-medium">Back Side</h3>
+                    <div>
+                        <label for="backText" class="block text-sm font-medium text-gray-700 mb-1">Text</label>
+                        <textarea id="backText" class="w-full border border-gray-300 rounded-md p-2 h-32" aria-label="Back side text"></textarea>
+                    </div>
+                </div>
+            </div>
+            <button id="createCardBtn" class="mt-6 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors">Create Flashcard</button>
+        </div>
+
+
+        <div class="space-y-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold">Your Flashcards</h2>
+                <div>
+                    <button id="gridViewBtn" class="px-3 py-1 border border-blue-600 text-blue-600 bg-blue-100 rounded-l-md text-sm">Grid</button>
+                    <button id="listViewBtn" class="px-3 py-1 border-t border-b border-r border-blue-600 text-blue-600 bg-white rounded-r-md text-sm">List</button>
+                </div>
+            </div>
+            <div id="flashcardsContainer" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                </div>
+            <div id="flashcardsListContainer" class="hidden bg-white rounded-lg shadow-md overflow-hidden">
+                 </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // DOM elements
+            const frontTextInput = document.getElementById('frontText');
+            const backTextInput = document.getElementById('backText');
+            const createCardBtn = document.getElementById('createCardBtn');
+            const flashcardsContainer = document.getElementById('flashcardsContainer');
+            const flashcardsListContainer = document.getElementById('flashcardsListContainer');
+            const gridViewBtn = document.getElementById('gridViewBtn');
+            const listViewBtn = document.getElementById('listViewBtn');
+
+            let currentView = 'grid';
+
+            // Event Listeners
+            createCardBtn.addEventListener('click', handleCreateFlashcard);
+            gridViewBtn.addEventListener('click', () => switchView('grid'));
+            listViewBtn.addEventListener('click', () => switchView('list'));
+
+            // Initial Load
+            loadAndRenderViews();
+            switchView(localStorage.getItem('flashcardView') || 'grid');
+
+            // --- Functions --- (Most are unchanged) ---
+
+            function handleCreateFlashcard() {
+                const frontText = frontTextInput.value.trim();
+                const backText = backTextInput.value.trim();
+                if (!frontText || !backText) {
+                    alert('Please add text to both sides of the flashcard.');
+                    return;
+                }
+                const newFlashcard = { id: Date.now(), frontText, backText };
+                saveFlashcard(newFlashcard);
+                resetForm();
+                loadAndRenderViews();
+            }
+
+            function saveFlashcard(flashcard) {
+                const flashcards = getFlashcards();
+                flashcards.push(flashcard);
+                localStorage.setItem('flashcards', JSON.stringify(flashcards));
+            }
+
+             function resetForm() {
+                frontTextInput.value = '';
+                backTextInput.value = '';
+            }
+
+             function getFlashcards() {
+                const storedCards = localStorage.getItem('flashcards');
+                if (storedCards) { try { const parsedCards = JSON.parse(storedCards); return Array.isArray(parsedCards) ? parsedCards : []; } catch (e) { console.error("Error parsing flashcards from localStorage:", e); return []; } } return [];
+            }
+
+             function loadAndRenderViews() {
+                const flashcards = getFlashcards();
+                renderGridView(flashcards);
+                renderListView(flashcards);
+            }
+
+             function renderGridView(flashcards) {
+                flashcardsContainer.innerHTML = '';
+                flashcards.forEach(flashcard => { if (flashcard?.id !== undefined) addFlashcardToGridDisplay(flashcard); });
+            }
+
+             function renderListView(flashcards) {
+                flashcardsListContainer.innerHTML = '';
+                if (flashcards.length === 0) { flashcardsListContainer.innerHTML = '<p class="text-center text-gray-500 p-4">No flashcards yet.</p>'; return; }
+                const list = document.createElement('ul');
+                flashcards.forEach(flashcard => {
+                    if (flashcard?.id !== undefined) {
+                        const listItem = document.createElement('li'); listItem.classList.add('list-item', 'p-3', 'flex', 'justify-between', 'items-center', 'border-b', 'last:border-b-0'); listItem.dataset.id = flashcard.id;
+                        const textDiv = document.createElement('div'); textDiv.classList.add('text-sm', 'truncate', 'pr-2');
+                        textDiv.textContent = flashcard.frontText || '[No Front Text]';
+                        const deleteBtn = createDeleteButton(flashcard.id);
+                        listItem.appendChild(textDiv); listItem.appendChild(deleteBtn); list.appendChild(listItem);
+                    }
+                });
+                 flashcardsListContainer.appendChild(list);
+            }
+
+             function createDeleteButton(id) {
+                const deleteBtn = document.createElement('button'); deleteBtn.innerHTML = '&times;'; deleteBtn.setAttribute('aria-label', 'Delete flashcard');
+                deleteBtn.classList.add('bg-red-500', 'text-white', 'rounded-full', 'w-5', 'h-5', 'flex', 'items-center', 'justify-center', 'text-xs', 'flex-shrink-0', 'hover:bg-red-600', 'transition-colors');
+                deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); if (confirm('Are you sure you want to delete this flashcard?')) deleteFlashcard(id); }); return deleteBtn;
+            }
+
+             function deleteFlashcard(id) {
+                let flashcards = getFlashcards(); flashcards = flashcards.filter(card => card.id !== id); localStorage.setItem('flashcards', JSON.stringify(flashcards)); loadAndRenderViews();
+            }
+
+             function switchView(viewToShow) {
+                currentView = viewToShow; localStorage.setItem('flashcardView', viewToShow);
+                if (viewToShow === 'grid') {
+                    flashcardsContainer.classList.remove('hidden'); flashcardsListContainer.classList.add('hidden');
+                    gridViewBtn.classList.add('bg-blue-100'); gridViewBtn.classList.remove('bg-white'); listViewBtn.classList.add('bg-white'); listViewBtn.classList.remove('bg-blue-100');
+                } else {
+                    flashcardsContainer.classList.add('hidden'); flashcardsListContainer.classList.remove('hidden');
+                    gridViewBtn.classList.add('bg-white'); gridViewBtn.classList.remove('bg-blue-100'); listViewBtn.classList.add('bg-blue-100'); listViewBtn.classList.remove('bg-white');
+                }
+            }
+
+            // Card Display Function
+            function addFlashcardToGridDisplay(flashcard) {
+                const cardElement = document.createElement('div');
+                cardElement.classList.add('flashcard', 'relative', 'bg-white', 'rounded-lg', 'shadow-md', 'h-64', 'cursor-pointer', 'flex', 'flex-col', 'p-4', 'border', 'border-gray-200', 'overflow-hidden');
+                cardElement.dataset.id = flashcard.id;
+                cardElement.dataset.showing = 'front';
+
+                const cardFace = document.createElement('div');
+                cardFace.classList.add('card-face', 'flex-grow', 'overflow-auto', 'flex', 'flex-col', 'justify-center', 'items-center', 'text-center');
+
+                // --- Function to render content for a given side ---
+                function renderSide(sideToShow) {
+                    cardFace.innerHTML = '';
+                    const textToShow = (sideToShow === 'front') ? flashcard.frontText : flashcard.backText;
+
+                    const textDiv = document.createElement('div');
+                    // *** THIS IS THE CHANGED LINE ***
+                    textDiv.classList.add('text-4xl'); // Changed from text-xl to text-4xl
+                    // *** END OF CHANGE ***
+                    textDiv.textContent = textToShow;
+                    cardFace.appendChild(textDiv);
+
+                    cardElement.dataset.showing = sideToShow;
+                }
+
+                renderSide('front'); // Initial render (Front side)
+
+                const switchSideText = document.createElement('div');
+                switchSideText.classList.add('text-xs', 'text-gray-500', 'text-center', 'mt-auto', 'pt-2', 'flex-shrink-0');
+                switchSideText.textContent = 'Click to show back';
+
+
+                cardElement.appendChild(cardFace);
+                cardElement.appendChild(switchSideText);
+
+                const deleteBtn = createDeleteButton(flashcard.id);
+                deleteBtn.classList.add('absolute', 'top-2', 'right-2', 'z-10', 'opacity-50', 'hover:opacity-100', 'transition-opacity');
+                cardElement.appendChild(deleteBtn);
+
+                flashcardsContainer.appendChild(cardElement);
+
+                cardElement.addEventListener('click', (e) => {
+                    if (e.target.closest('button')) { return; }
+
+                    const currentState = cardElement.dataset.showing;
+                    const newState = (currentState === 'front') ? 'back' : 'front';
+                    renderSide(newState);
+                    switchSideText.textContent = (newState === 'front') ? 'Click to show back' : 'Click to show front';
+                });
+            }
+
+        });
+    </script>
+<script>
+    // Register the Service Worker
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js') // Path relative to origin root
+                .then(registration => {
+                    console.log('ServiceWorker registered with scope: ', registration.scope);
+                })
+                .catch(error => {
+                    console.log('ServiceWorker registration failed: ', error);
+                });
+        });
+    }
+</script>
+</body>
+</html>
