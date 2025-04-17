@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flashcard App (Text Only)</title>
     <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#4a90e2"> 
+    <meta name="theme-color" content="#4a90e2">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         .list-item:nth-child(odd) { background-color: #f9fafb; }
@@ -37,7 +37,30 @@
             <button id="createCardBtn" class="mt-6 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors">Create Flashcard</button>
         </div>
 
+        <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4">Manage Flashcards</h2>
+            <div class="flex flex-col sm:flex-row gap-4 items-start">
+                <button id="exportBtn" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition-colors">Export All Flashcards</button>
 
+                <div class="flex flex-col gap-2">
+                     <div class="flex items-center gap-4">
+                        <button id="importBtn" class="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 transition-colors">Import from File</button>
+                        <input type="file" id="importFile" accept=".json" style="display: none;" aria-hidden="true">
+                     </div>
+                     <div class="text-sm text-gray-600">
+                        <label class="inline-flex items-center mr-4">
+                            <input type="radio" name="importMode" value="merge" class="form-radio" checked>
+                            <span class="ml-2">Merge with existing</span>
+                        </label>
+                        <label class="inline-flex items-center">
+                            <input type="radio" name="importMode" value="replace" class="form-radio">
+                            <span class="ml-2">Replace existing</span>
+                        </label>
+                     </div>
+                </div>
+            </div>
+            <p class="text-xs text-gray-500 mt-4">Export saves your cards to a JSON file. Import loads cards from a previously exported file.</p>
+        </div>
         <div class="space-y-6">
             <div class="flex justify-between items-center mb-4">
                 <h2 class="text-xl font-semibold">Your Flashcards</h2>
@@ -63,6 +86,11 @@
             const flashcardsListContainer = document.getElementById('flashcardsListContainer');
             const gridViewBtn = document.getElementById('gridViewBtn');
             const listViewBtn = document.getElementById('listViewBtn');
+            // Added Export/Import elements
+            const exportBtn = document.getElementById('exportBtn');
+            const importBtn = document.getElementById('importBtn');
+            const importFile = document.getElementById('importFile');
+
 
             let currentView = 'grid';
 
@@ -70,12 +98,17 @@
             createCardBtn.addEventListener('click', handleCreateFlashcard);
             gridViewBtn.addEventListener('click', () => switchView('grid'));
             listViewBtn.addEventListener('click', () => switchView('list'));
+            // Added Export/Import listeners
+            exportBtn.addEventListener('click', handleExport);
+            importBtn.addEventListener('click', () => importFile.click()); // Trigger hidden file input
+            importFile.addEventListener('change', handleFileSelect); // Listen for file selection
+
 
             // Initial Load
             loadAndRenderViews();
             switchView(localStorage.getItem('flashcardView') || 'grid');
 
-            // --- Functions --- (Most are unchanged) ---
+            // --- Functions ---
 
             function handleCreateFlashcard() {
                 const frontText = frontTextInput.value.trim();
@@ -93,7 +126,15 @@
             function saveFlashcard(flashcard) {
                 const flashcards = getFlashcards();
                 flashcards.push(flashcard);
-                localStorage.setItem('flashcards', JSON.stringify(flashcards));
+                // Use try...catch for saving in case of quota errors, though less likely now
+                try {
+                    localStorage.setItem('flashcards', JSON.stringify(flashcards));
+                } catch (error) {
+                     console.error("Error saving flashcards to localStorage:", error);
+                     alert(`Error saving card: ${error.message}\nStorage might be full.`);
+                     // Optionally remove the card just added if save failed
+                     // flashcards.pop(); // Remove the card that failed to save
+                }
             }
 
              function resetForm() {
@@ -154,7 +195,6 @@
                 }
             }
 
-            // Card Display Function
             function addFlashcardToGridDisplay(flashcard) {
                 const cardElement = document.createElement('div');
                 cardElement.classList.add('flashcard', 'relative', 'bg-white', 'rounded-lg', 'shadow-md', 'h-64', 'cursor-pointer', 'flex', 'flex-col', 'p-4', 'border', 'border-gray-200', 'overflow-hidden');
@@ -164,27 +204,21 @@
                 const cardFace = document.createElement('div');
                 cardFace.classList.add('card-face', 'flex-grow', 'overflow-auto', 'flex', 'flex-col', 'justify-center', 'items-center', 'text-center');
 
-                // --- Function to render content for a given side ---
                 function renderSide(sideToShow) {
                     cardFace.innerHTML = '';
                     const textToShow = (sideToShow === 'front') ? flashcard.frontText : flashcard.backText;
-
                     const textDiv = document.createElement('div');
-                    // *** THIS IS THE CHANGED LINE ***
-                    textDiv.classList.add('text-4xl'); // Changed from text-xl to text-4xl
-                    // *** END OF CHANGE ***
+                    textDiv.classList.add('text-4xl'); // Kept user's preferred size
                     textDiv.textContent = textToShow;
                     cardFace.appendChild(textDiv);
-
                     cardElement.dataset.showing = sideToShow;
                 }
 
-                renderSide('front'); // Initial render (Front side)
+                renderSide('front');
 
                 const switchSideText = document.createElement('div');
                 switchSideText.classList.add('text-xs', 'text-gray-500', 'text-center', 'mt-auto', 'pt-2', 'flex-shrink-0');
                 switchSideText.textContent = 'Click to show back';
-
 
                 cardElement.appendChild(cardFace);
                 cardElement.appendChild(switchSideText);
@@ -197,7 +231,6 @@
 
                 cardElement.addEventListener('click', (e) => {
                     if (e.target.closest('button')) { return; }
-
                     const currentState = cardElement.dataset.showing;
                     const newState = (currentState === 'front') ? 'back' : 'front';
                     renderSide(newState);
@@ -205,21 +238,104 @@
                 });
             }
 
-        });
+
+        // --- NEW Export Function ---
+        function handleExport() {
+            const flashcards = getFlashcards();
+            if (flashcards.length === 0) {
+                alert("There are no flashcards to export.");
+                return;
+            }
+            const jsonString = JSON.stringify(flashcards, null, 2);
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            a.download = `flashcards_export_${timestamp}.json`;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 100);
+             alert(`Exported ${flashcards.length} flashcards.`);
+        }
+
+        // --- NEW Import Functions ---
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) { return; }
+
+             if (!file.name.endsWith('.json')) {
+                 alert("Please select a valid .json file exported from this app.");
+                 event.target.value = null; return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const fileContent = e.target.result;
+                let importedFlashcards;
+                try {
+                    importedFlashcards = JSON.parse(fileContent);
+                    if (!Array.isArray(importedFlashcards)) { throw new Error("Invalid file format: Not a JSON array."); }
+                    const isValidStructure = importedFlashcards.every(item => typeof item === 'object' && item !== null && item.hasOwnProperty('id') && item.hasOwnProperty('frontText') && item.hasOwnProperty('backText'));
+                     if (!isValidStructure && importedFlashcards.length > 0) { throw new Error("Invalid file format: Data structure doesn't match expected flashcard format."); }
+                } catch (error) {
+                    console.error("Error reading or parsing JSON file:", error);
+                    alert(`Error importing file: ${error.message}\nPlease ensure the file is a valid JSON exported from this app.`);
+                     event.target.value = null; return;
+                }
+
+                const importMode = document.querySelector('input[name="importMode"]:checked')?.value || 'merge';
+                let currentFlashcards = getFlashcards();
+                let finalFlashcards;
+                let importedCount = importedFlashcards.length;
+                let addedCount = 0;
+
+                if (importMode === 'replace') {
+                    finalFlashcards = importedFlashcards;
+                    addedCount = importedFlashcards.length;
+                } else { // Merge
+                    finalFlashcards = [...currentFlashcards];
+                    const currentIds = new Set(currentFlashcards.map(card => card.id));
+                    importedFlashcards.forEach(importedCard => {
+                        // Add if ID doesn't exist OR if it's a very old card maybe without proper ID (basic safety)
+                        if (!currentIds.has(importedCard.id) && importedCard.id) {
+                            finalFlashcards.push(importedCard);
+                            addedCount++;
+                        }
+                    });
+                }
+
+                 try { localStorage.setItem('flashcards', JSON.stringify(finalFlashcards)); }
+                 catch (error) {
+                    console.error("Error saving imported flashcards to localStorage:", error);
+                    alert(`Error saving imported cards: ${error.message}\nStorage might be full.`);
+                    event.target.value = null; return;
+                 }
+
+                loadAndRenderViews();
+                alert(`Import successful!\nMode: ${importMode}\nCards in file: ${importedCount}\nNew cards added/merged: ${addedCount}\nTotal cards now: ${finalFlashcards.length}`);
+                event.target.value = null; // Reset file input
+            };
+             reader.onerror = function(e) { console.error("Error reading file:", e); alert("An error occurred while trying to read the file."); event.target.value = null; };
+            reader.readAsText(file);
+        }
+
+
+     });// End DOMContentLoaded
     </script>
-<script>
-    // Register the Service Worker
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-            navigator.serviceWorker.register('/sw.js') // Path relative to origin root
-                .then(registration => {
-                    console.log('ServiceWorker registered with scope: ', registration.scope);
-                })
-                .catch(error => {
-                    console.log('ServiceWorker registration failed: ', error);
-                });
-        });
-    }
-</script>
+    <script>
+        // Register the Service Worker (Keep this separate is fine)
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(registration => { console.log('ServiceWorker registered with scope: ', registration.scope); })
+                    .catch(error => { console.log('ServiceWorker registration failed: ', error); });
+            });
+        }
+    </script>
 </body>
 </html>
