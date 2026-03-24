@@ -1,0 +1,24 @@
+{
+    "name": "GPT Builder — Multi-Agent Pipeline",
+    "short_name": "GPT Builder",
+    "description": "Build custom GPTs with a multi-agent pipeline that researches, designs, and validates your GPT configuration.",
+    "start_url": "/gpt-builder/index.html",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#2563eb",
+    "orientation": "portrait-primary",
+    "icons": [
+        {
+            "src": "/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ]
+}

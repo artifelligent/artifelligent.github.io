@@ -1,4 +1,4 @@
-const CACHE_NAME = 'flashcard-text-cache-v1';
+const CACHE_NAME = 'flashcard-text-cache-v2';
 // Added paths for icons, though browser might fetch them via manifest anyway
 const urlsToCache = [
     '/', // Represents the root directory index (important!)
@@ -6,7 +6,16 @@ const urlsToCache = [
     '/manifest.json',
     'https://cdn.tailwindcss.com', // Tailwind styles
     '/icon-192.png', // Optional, but good to cache if provided
-    '/icon-512.png'  // Optional, but good to cache if provided
+    '/icon-512.png',  // Optional, but good to cache if provided
+    // GPT Builder app
+    '/gpt-builder/index.html',
+    '/gpt-builder/store.js',
+    '/gpt-builder/api.js',
+    '/gpt-builder/search.js',
+    '/gpt-builder/agents.js',
+    '/gpt-builder/pipeline.js',
+    '/gpt-builder/app.js',
+    '/gpt-builder/manifest.json'
 ];
 
 // Install event: Cache essential files
