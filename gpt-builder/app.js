@@ -407,9 +407,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // =====================================================================
-  // PLACEHOLDER FUNCTIONS — will be implemented in subsequent chunks
-  // =====================================================================
 
   // =====================================================================
   // CHUNK 2: Idle View + LLM-Powered Intake Wizard
