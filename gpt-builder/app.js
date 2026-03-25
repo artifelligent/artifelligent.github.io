@@ -979,13 +979,276 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Chunk 5: HITL checkpoints 3 & 4
+  // =====================================================================
+  // CHUNK 5: HITL Checkpoint 3 (Config/Knowledge Review) & Checkpoint 4 (Results Review)
+  // =====================================================================
+
   function renderConfigReview(project) {
-    mainContent.innerHTML = '<div class="max-w-2xl mx-auto text-center py-16"><p class="text-gray-500">Knowledge review — chunk 5</p></div>';
+    if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+    const knowledge = project?.agentOutputs?.knowledgeCurator;
+    const persona = project?.agentOutputs?.personaDesigner;
+    if (!knowledge) {
+      mainContent.innerHTML = '<div class="max-w-2xl mx-auto text-center py-16"><p class="text-gray-500">No knowledge data found.</p></div>';
+      return;
+    }
+
+    // Document entries to display
+    const docs = [
+      { key: 'faqDocument', label: 'FAQ Document', icon: '\u2753' },
+      { key: 'referenceGuide', label: 'Reference Guide', icon: '\uD83D\uDCD6' },
+      { key: 'edgeCases', label: 'Edge Cases', icon: '\u26A0\uFE0F' },
+      { key: 'quickReference', label: 'Quick Reference Card', icon: '\uD83D\uDCCB' },
+      { key: 'sampleConversations', label: 'Sample Conversations', icon: '\uD83D\uDCAC' },
+      { key: 'troubleshootingGuide', label: 'Troubleshooting Guide', icon: '\uD83D\uDD27' }
+    ];
+
+    const docsHtml = docs
+      .filter(d => knowledge[d.key])
+      .map(d => {
+        const content = knowledge[d.key];
+        const wordCount = content.split(/\s+/).length;
+        const preview = esc(content);
+        return collapsibleSection(
+          `${d.icon} ${d.label} <span class="text-xs text-gray-400 ml-2">${wordCount} words</span>`,
+          `<div class="relative">
+            <pre class="whitespace-pre-wrap text-sm font-mono bg-gray-50 rounded p-3 max-h-64 overflow-y-auto">${preview}</pre>
+            <button class="copy-doc-btn absolute top-2 right-2 text-xs bg-white border rounded px-2 py-1 hover:bg-gray-100 transition-colors" data-doc-key="${d.key}">Copy</button>
+          </div>`,
+          false
+        );
+      }).join('');
+
+    const docCount = docs.filter(d => knowledge[d.key]).length;
+
+    mainContent.innerHTML = `
+      <div class="max-w-3xl mx-auto fade-in">
+        <div class="bg-white rounded-lg shadow-md p-6">
+          ${agentBadge('librarian')}
+          <div class="flex items-center justify-between mb-1">
+            <h2 class="text-xl font-bold">Knowledge Base Review</h2>
+            <span class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">${docCount} documents</span>
+          </div>
+          <p class="text-sm text-gray-500 mb-4">Review the knowledge documents curated by Librarian. These will be uploaded to your GPT.</p>
+
+          ${persona ? `<div class="bg-gray-50 rounded-md p-3 mb-4 text-sm"><span class="font-medium">GPT:</span> ${esc(persona.name)} &mdash; ${esc(persona.description)}</div>` : ''}
+
+          ${docsHtml}
+
+          ${knowledge.scratchpadNote ? `<div class="bg-green-50 border border-green-200 rounded-md p-3 mt-3 text-sm"><span class="font-medium text-green-700">Librarian's note:</span> ${esc(knowledge.scratchpadNote)}</div>` : ''}
+
+          <!-- Feedback -->
+          <div class="mt-5 border-t pt-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Request changes (optional)</label>
+            <textarea id="knowledgeFeedback" class="w-full border border-gray-300 rounded-md p-2 text-sm" rows="2" placeholder="e.g. Add more FAQ entries about X, expand the troubleshooting section..."></textarea>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex gap-3 mt-4">
+            <button id="approveConfigBtn" class="flex-1 bg-green-600 text-white py-2 rounded-md hover:bg-green-700 transition-colors font-medium">Approve & Run Validation</button>
+            <button id="reviseKnowledgeBtn" class="border border-gray-300 px-4 py-2 rounded-md hover:bg-gray-50 transition-colors text-gray-700">Request Changes</button>
+          </div>
+        </div>
+      </div>`;
+
+    // Copy buttons
+    mainContent.querySelectorAll('.copy-doc-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.docKey;
+        const text = knowledge[key] || '';
+        navigator.clipboard.writeText(text).then(() => {
+          btn.textContent = 'Copied!';
+          setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+        });
+      });
+    });
+
+    document.getElementById('approveConfigBtn')?.addEventListener('click', () => {
+      disableActions();
+      pipeline.approveConfig();
+    });
+
+    document.getElementById('reviseKnowledgeBtn')?.addEventListener('click', () => {
+      const feedback = document.getElementById('knowledgeFeedback')?.value?.trim();
+      if (!feedback) {
+        document.getElementById('knowledgeFeedback')?.focus();
+        return;
+      }
+      disableActions();
+      pipeline.requestKnowledgeChanges(feedback);
+    });
   }
 
   function renderResultsReview(project) {
-    mainContent.innerHTML = '<div class="max-w-2xl mx-auto text-center py-16"><p class="text-gray-500">Results review — chunk 5</p></div>';
+    if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+    const validator = project?.agentOutputs?.validator;
+    const persona = project?.agentOutputs?.personaDesigner;
+    if (!validator) {
+      mainContent.innerHTML = '<div class="max-w-2xl mx-auto text-center py-16"><p class="text-gray-500">No validation data found.</p></div>';
+      return;
+    }
+
+    const overallScore = validator.overallScore || 0;
+    const scoreColor = overallScore >= 4 ? 'text-green-600' : overallScore >= 3 ? 'text-yellow-600' : 'text-red-600';
+    const scoreBg = overallScore >= 4 ? 'bg-green-50 border-green-200' : overallScore >= 3 ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200';
+
+    // Test results table
+    const testsHtml = (validator.testResults || []).map(t => {
+      const avgScore = t.scores ? ((t.scores.accuracy + t.scores.helpfulness + t.scores.toneConsistency + t.scores.guardrailCompliance) / 4).toFixed(1) : '?';
+      const catBadge = {
+        easy: 'bg-green-100 text-green-700',
+        medium: 'bg-yellow-100 text-yellow-700',
+        hard: 'bg-orange-100 text-orange-700',
+        edge_case: 'bg-purple-100 text-purple-700',
+        out_of_scope: 'bg-red-100 text-red-700'
+      }[t.category] || 'bg-gray-100 text-gray-700';
+      const issues = (t.issues || []).length > 0
+        ? `<div class="text-xs text-red-500 mt-1">${t.issues.map(i => esc(i)).join('; ')}</div>`
+        : '';
+      return `<div class="border rounded-md p-3 mb-2">
+        <div class="flex items-start justify-between gap-2">
+          <div class="flex-1">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-xs px-1.5 py-0.5 rounded ${catBadge}">${esc(t.category)}</span>
+              <span class="text-xs text-gray-400">avg: ${avgScore}/5</span>
+            </div>
+            <div class="text-sm font-medium">${esc(t.query)}</div>
+          </div>
+          <div class="flex gap-1 flex-shrink-0">
+            ${scoreChip('A', t.scores?.accuracy)}${scoreChip('H', t.scores?.helpfulness)}${scoreChip('T', t.scores?.toneConsistency)}${scoreChip('G', t.scores?.guardrailCompliance)}
+          </div>
+        </div>
+        <details class="mt-2">
+          <summary class="text-xs text-blue-500 cursor-pointer">Show simulated response</summary>
+          <div class="text-sm text-gray-600 mt-1 bg-gray-50 rounded p-2">${esc(t.simulatedResponse)}</div>
+        </details>
+        ${issues}
+      </div>`;
+    }).join('');
+
+    // Conversation simulations
+    const convoHtml = (validator.conversationSims || []).map(sim => {
+      const turnsHtml = sim.turns.map(turn =>
+        turn.role === 'user'
+          ? `<div class="flex justify-end"><div class="chat-bubble-user px-3 py-2 max-w-[80%] text-sm">${esc(turn.content)}</div></div>`
+          : `<div class="flex justify-start"><div class="chat-bubble-assistant px-3 py-2 max-w-[80%] text-sm">${esc(turn.content)}</div></div>`
+      ).join('');
+      return collapsibleSection(
+        `\uD83D\uDCAC ${esc(sim.title)}`,
+        `<div class="space-y-2">${turnsHtml}</div>
+         <div class="mt-2 text-xs text-gray-500 bg-gray-50 rounded p-2"><span class="font-medium">Assessment:</span> ${esc(sim.assessment)}</div>`,
+        false
+      );
+    }).join('');
+
+    // Guardrail results
+    const guardrailHtml = (validator.guardrailResults || []).map(g => {
+      const icon = g.passed ? '<span class="text-green-500">\u2705</span>' : '<span class="text-red-500">\u274C</span>';
+      return `<div class="flex items-start gap-2 mb-2">
+        ${icon}
+        <div>
+          <div class="text-sm font-medium">${esc(g.category)}: ${esc(g.testDescription)}</div>
+          <div class="text-xs text-gray-500">${esc(g.details)}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    const passCount = (validator.guardrailResults || []).filter(g => g.passed).length;
+    const totalGuardrails = (validator.guardrailResults || []).length;
+
+    // Gaps & recommendations
+    const gapsHtml = (validator.gaps || []).map(g => `<li class="text-sm text-amber-700">${esc(g)}</li>`).join('');
+    const recsHtml = (validator.recommendations || []).map(r => `<li class="text-sm text-blue-700">${esc(r)}</li>`).join('');
+
+    mainContent.innerHTML = `
+      <div class="max-w-3xl mx-auto fade-in">
+        <div class="bg-white rounded-lg shadow-md p-6">
+          ${agentBadge('inspector')}
+          <h2 class="text-xl font-bold mb-1">Validation Results</h2>
+          <p class="text-sm text-gray-500 mb-4">Inspector ran ${(validator.testResults || []).length} test queries, ${(validator.conversationSims || []).length} conversation simulations, and ${totalGuardrails} guardrail tests.</p>
+
+          <!-- Overall Score -->
+          <div class="${scoreBg} border rounded-lg p-4 mb-4 text-center">
+            <div class="text-4xl font-bold ${scoreColor}">${overallScore}/5</div>
+            <div class="text-sm text-gray-600">Overall Quality Score</div>
+          </div>
+
+          <!-- Test Results -->
+          ${collapsibleSection(
+            `Test Queries (${(validator.testResults || []).length})`,
+            testsHtml,
+            true
+          )}
+
+          <!-- Conversation Simulations -->
+          ${collapsibleSection(
+            `Conversation Simulations (${(validator.conversationSims || []).length})`,
+            convoHtml,
+            false
+          )}
+
+          <!-- Guardrail Tests -->
+          ${collapsibleSection(
+            `Guardrail Tests (${passCount}/${totalGuardrails} passed)`,
+            guardrailHtml,
+            totalGuardrails > 0
+          )}
+
+          <!-- Gaps & Recommendations -->
+          ${(validator.gaps || []).length > 0 ? collapsibleSection(
+            `Identified Gaps (${validator.gaps.length})`,
+            '<ul class="list-disc list-inside space-y-1">' + gapsHtml + '</ul>',
+            true
+          ) : ''}
+          ${(validator.recommendations || []).length > 0 ? collapsibleSection(
+            `Recommendations (${validator.recommendations.length})`,
+            '<ul class="list-disc list-inside space-y-1">' + recsHtml + '</ul>',
+            true
+          ) : ''}
+
+          <!-- Revision feedback -->
+          <div class="mt-5 border-t pt-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Revision feedback (optional — sends back to Architect)</label>
+            <textarea id="resultsFeedback" class="w-full border border-gray-300 rounded-md p-2 text-sm" rows="2" placeholder="e.g. Improve guardrail handling for X, adjust tone in responses..."></textarea>
+            <div class="flex gap-2 mt-2">
+              <label class="text-xs text-gray-500">Revise target:</label>
+              <select id="revisionTarget" class="text-xs border rounded px-2 py-1">
+                <option value="personaDesigner">Architect (persona)</option>
+                <option value="knowledgeCurator">Librarian (knowledge)</option>
+                <option value="researcher">Scout (research)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex gap-3 mt-4">
+            <button id="approveResultsBtn" class="flex-1 bg-green-600 text-white py-2 rounded-md hover:bg-green-700 transition-colors font-medium">Approve & Finish</button>
+            <button id="reviseResultsBtn" class="border border-gray-300 px-4 py-2 rounded-md hover:bg-gray-50 transition-colors text-gray-700">Request Revision</button>
+          </div>
+        </div>
+      </div>`;
+
+    document.getElementById('approveResultsBtn')?.addEventListener('click', () => {
+      disableActions();
+      pipeline.approveResults();
+    });
+
+    document.getElementById('reviseResultsBtn')?.addEventListener('click', () => {
+      const feedback = document.getElementById('resultsFeedback')?.value?.trim();
+      if (!feedback) {
+        document.getElementById('resultsFeedback')?.focus();
+        return;
+      }
+      const target = document.getElementById('revisionTarget')?.value || 'personaDesigner';
+      disableActions();
+      pipeline.revise(feedback, target);
+    });
+  }
+
+  // --- Score chip helper for validation scores ---
+  function scoreChip(label, score) {
+    if (score == null) return '';
+    const color = score >= 4 ? 'bg-green-100 text-green-700' : score >= 3 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700';
+    return `<span class="text-xs px-1.5 py-0.5 rounded ${color}" title="${label}: ${score}/5">${label}${score}</span>`;
   }
 
   // Chunk 6: Complete view with guided export
