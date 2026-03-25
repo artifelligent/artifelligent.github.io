@@ -632,40 +632,143 @@ document.addEventListener('DOMContentLoaded', () => {
     </div>`;
   }
 
-  // Chunk 3: Progress view
+  // =====================================================================
+  // CHUNK 3: Progress View + Error View
+  // =====================================================================
+
+  let progressTimer = null;
+
   function renderProgressView(agentName, charKey, title, subtitle) {
+    // Clear any existing timer
+    if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+
+    const startTime = Date.now();
+
+    // Map stage to step number for the mini-stepper
+    const stageSteps = {
+      searching: { num: 1, total: 4, label: 'Searching' },
+      researching: { num: 1, total: 4, label: 'Researching' },
+      designing_persona: { num: 2, total: 4, label: 'Designing' },
+      curating_knowledge: { num: 3, total: 4, label: 'Curating' },
+      validating: { num: 4, total: 4, label: 'Validating' },
+      revising: { num: 2, total: 4, label: 'Revising' }
+    };
+    const currentStage = currentProject ? currentProject.currentStage : '';
+    const step = stageSteps[currentStage] || { num: 0, total: 4, label: '' };
+    const progressPct = step.total > 0 ? Math.round((step.num / step.total) * 100) : 0;
+
     mainContent.innerHTML = `
       <div class="max-w-2xl mx-auto">
-        <div class="bg-white rounded-lg shadow-md p-6">
+        <div class="bg-white rounded-lg shadow-md p-6 fade-in">
           ${agentBadge(charKey)}
-          <div class="text-center py-8">
+
+          <!-- Progress bar -->
+          <div class="mb-4">
+            <div class="flex justify-between text-xs text-gray-500 mb-1">
+              <span>Step ${step.num} of ${step.total}: ${step.label}</span>
+              <span id="elapsedTimer">0:00</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-2">
+              <div class="bg-blue-600 h-2 rounded-full transition-all duration-500" style="width: ${progressPct}%"></div>
+            </div>
+          </div>
+
+          <!-- Spinner + Title -->
+          <div class="text-center py-6">
             <div class="inline-block mb-4">
               <div class="animate-spin rounded-full h-10 w-10 border-4 border-blue-200 border-t-blue-600"></div>
             </div>
-            <h2 class="text-lg font-semibold mb-1">${title}</h2>
-            <p class="text-gray-500 text-sm">${subtitle}</p>
+            <h2 class="text-lg font-semibold mb-1">${esc(title)}</h2>
+            <p class="text-gray-500 text-sm">${esc(subtitle)}</p>
           </div>
+
+          <!-- Live Activity Log -->
           <div class="bg-gray-50 rounded-lg p-3 mt-4">
-            <div class="text-xs font-medium text-gray-400 mb-1">Live Activity</div>
-            <div id="inlineActivityLog" class="activity-log bg-white border rounded text-xs" style="max-height:150px">
+            <div class="flex justify-between items-center mb-1">
+              <div class="text-xs font-medium text-gray-400">Live Activity</div>
+              <button id="toggleLogBtn" class="text-xs text-blue-500 hover:text-blue-700">Expand</button>
+            </div>
+            <div id="inlineActivityLog" class="activity-log bg-white border rounded text-xs overflow-y-auto transition-all duration-300" style="max-height:120px">
               <div class="log-entry log-info p-1 text-gray-400">Starting...</div>
             </div>
+          </div>
+
+          <!-- Cancel -->
+          <div class="text-center mt-4">
+            <button id="cancelPipelineBtn" class="text-xs text-gray-400 hover:text-red-500 transition-colors">Cancel and return to start</button>
           </div>
         </div>
       </div>`;
 
-    // Mirror activity log entries to the inline log
+    // --- Elapsed timer ---
+    const timerEl = document.getElementById('elapsedTimer');
+    progressTimer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const mins = Math.floor(elapsed / 60);
+      const secs = elapsed % 60;
+      if (timerEl) timerEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+    }, 1000);
+
+    // --- Inline log: seed from existing entries ---
     const inlineLog = document.getElementById('inlineActivityLog');
     if (inlineLog) {
-      // Copy existing recent entries
       const existing = api.getActivityLog().slice(-10);
-      existing.forEach(entry => {
-        const div = document.createElement('div');
-        div.className = `log-entry log-${entry.type} p-1`;
-        div.textContent = `[${new Date(entry.timestamp).toLocaleTimeString()}] ${entry.agent}: ${entry.message}`;
-        inlineLog.appendChild(div);
+      existing.forEach(entry => appendLogEntry(inlineLog, entry));
+    }
+
+    // --- Mirror new entries via MutationObserver on sidebar log ---
+    if (activityLogEl && inlineLog) {
+      const observer = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          for (const node of m.addedNodes) {
+            if (node.nodeType === 1 && node.classList.contains('log-entry')) {
+              const clone = node.cloneNode(true);
+              clone.className = clone.className.replace(/p-2/g, 'p-1');
+              inlineLog.appendChild(clone);
+              inlineLog.scrollTop = inlineLog.scrollHeight;
+            }
+          }
+        }
+      });
+      observer.observe(activityLogEl, { childList: true });
+
+      // Store observer so we can disconnect later
+      inlineLog._observer = observer;
+    }
+
+    // --- Toggle expand/collapse ---
+    const toggleBtn = document.getElementById('toggleLogBtn');
+    let expanded = false;
+    if (toggleBtn && inlineLog) {
+      toggleBtn.addEventListener('click', () => {
+        expanded = !expanded;
+        inlineLog.style.maxHeight = expanded ? '300px' : '120px';
+        toggleBtn.textContent = expanded ? 'Collapse' : 'Expand';
       });
     }
+
+    // --- Cancel button ---
+    document.getElementById('cancelPipelineBtn')?.addEventListener('click', () => {
+      if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+      if (inlineLog?._observer) inlineLog._observer.disconnect();
+      if (currentProject) {
+        store.updateStage(currentProject.id, 'idle');
+      }
+      currentProject = null;
+      pipeline.setCurrentProjectId(null);
+      updateStepper('idle');
+      renderIdleView();
+    });
+  }
+
+  function appendLogEntry(container, entry) {
+    const div = document.createElement('div');
+    const typeClass = entry.type === 'error' ? 'text-red-500' : entry.type === 'success' ? 'text-green-600' : 'text-gray-600';
+    div.className = `log-entry p-1 ${typeClass}`;
+    const time = new Date(entry.timestamp).toLocaleTimeString();
+    div.textContent = `[${time}] ${entry.agent || ''}: ${entry.message}`;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
   }
 
   // Chunk 4: HITL checkpoints 1 & 2
@@ -691,19 +794,46 @@ document.addEventListener('DOMContentLoaded', () => {
     mainContent.innerHTML = '<div class="max-w-2xl mx-auto text-center py-16"><p class="text-gray-500">Complete view — chunk 6</p></div>';
   }
 
-  // Chunk 3: Error view
+  // --- Error View ---
   function renderError(project) {
+    if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
     const msg = project?.lastError || 'An unknown error occurred.';
+    const stage = project?.currentStage || '';
+
+    // Friendly error categorization
+    let hint = '';
+    if (msg.includes('401') || msg.includes('Invalid API key')) {
+      hint = 'Your API key may be invalid or expired. Check your settings.';
+    } else if (msg.includes('429') || msg.includes('rate limit')) {
+      hint = 'Rate limit reached. Wait a moment and try again.';
+    } else if (msg.includes('network') || msg.includes('fetch')) {
+      hint = 'Network error. Check your internet connection.';
+    } else if (msg.includes('500') || msg.includes('server')) {
+      hint = 'The AI provider is experiencing issues. Try again shortly.';
+    }
+
     mainContent.innerHTML = `
-      <div class="max-w-2xl mx-auto text-center py-16">
-        <div class="text-red-500 text-5xl mb-4">!</div>
-        <h2 class="text-xl font-semibold mb-2">Something went wrong</h2>
-        <p class="text-gray-600 mb-4">${esc(msg)}</p>
-        <div class="flex gap-3 justify-center">
-          <button id="retryBtn" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors">Retry</button>
-          <button id="backToStartBtn" class="border border-gray-300 px-4 py-2 rounded-md hover:bg-gray-50 transition-colors text-gray-700">Start Over</button>
+      <div class="max-w-2xl mx-auto">
+        <div class="bg-white rounded-lg shadow-md p-6 text-center fade-in">
+          <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-100 mb-4">
+            <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path></svg>
+          </div>
+          <h2 class="text-xl font-semibold mb-2">Something went wrong</h2>
+          <p class="text-gray-600 mb-2">${esc(msg)}</p>
+          ${hint ? `<p class="text-sm text-amber-600 mb-4">${esc(hint)}</p>` : '<div class="mb-4"></div>'}
+          <div class="flex gap-3 justify-center">
+            <button id="retryBtn" class="bg-blue-600 text-white px-5 py-2 rounded-md hover:bg-blue-700 transition-colors font-medium">Retry</button>
+            <button id="backToStartBtn" class="border border-gray-300 px-5 py-2 rounded-md hover:bg-gray-50 transition-colors text-gray-700">Start Over</button>
+          </div>
+          <div class="mt-4">
+            <details class="text-left">
+              <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-600">Technical details</summary>
+              <pre class="mt-2 text-xs bg-gray-50 rounded p-2 overflow-x-auto text-gray-500">${esc(msg)}\nStage: ${esc(stage)}\nProject: ${esc(project?.id || 'unknown')}</pre>
+            </details>
+          </div>
         </div>
       </div>`;
+
     document.getElementById('retryBtn')?.addEventListener('click', () => {
       if (currentProject) pipeline.start(currentProject.id);
     });
