@@ -771,13 +771,212 @@ document.addEventListener('DOMContentLoaded', () => {
     container.scrollTop = container.scrollHeight;
   }
 
-  // Chunk 4: HITL checkpoints 1 & 2
+  // =====================================================================
+  // CHUNK 4: HITL Checkpoint 1 (Research Review) & Checkpoint 2 (Persona Review)
+  // =====================================================================
+
   function renderResearchReview(project) {
-    mainContent.innerHTML = '<div class="max-w-2xl mx-auto text-center py-16"><p class="text-gray-500">Research review — chunk 4</p></div>';
+    if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+    const research = project?.agentOutputs?.researcher;
+    if (!research) {
+      mainContent.innerHTML = '<div class="max-w-2xl mx-auto text-center py-16"><p class="text-gray-500">No research data found.</p></div>';
+      return;
+    }
+
+    const searchSrc = project.searchResults || {};
+
+    // Build best practices list
+    const practicesHtml = (research.gptBestPractices || []).map(p =>
+      `<div class="border-l-2 border-blue-300 pl-3 mb-2">
+        <div class="text-xs font-semibold text-blue-600">${esc(p.category)}</div>
+        <div class="text-sm font-medium">${esc(p.practice)}</div>
+        <div class="text-xs text-gray-500">${esc(p.details)}</div>
+      </div>`
+    ).join('');
+
+    // Build glossary
+    const glossaryHtml = (research.topicGlossary || []).map(t =>
+      `<div class="mb-1"><span class="font-medium text-sm">${esc(t.term)}:</span> <span class="text-sm text-gray-600">${esc(t.definition)}</span></div>`
+    ).join('');
+
+    // Build user intents
+    const intentsHtml = (research.userIntents || []).map(i => {
+      const badge = i.priority === 'high' ? 'bg-red-100 text-red-700' : i.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600';
+      return `<div class="flex items-start gap-2 mb-2">
+        <span class="text-xs px-1.5 py-0.5 rounded ${badge} flex-shrink-0">${esc(i.priority)}</span>
+        <div><div class="text-sm font-medium">${esc(i.intent)}</div><div class="text-xs text-gray-500">${esc(i.example)}</div></div>
+      </div>`;
+    }).join('');
+
+    // Domain boundaries
+    const inScope = (research.domainBoundaries?.inScope || []).map(s => `<li class="text-sm text-green-700">${esc(s)}</li>`).join('');
+    const outScope = (research.domainBoundaries?.outOfScope || []).map(s => `<li class="text-sm text-red-600">${esc(s)}</li>`).join('');
+
+    // Key facts
+    const factsHtml = (research.keyFacts || []).map(f =>
+      `<div class="mb-1"><span class="text-sm">${esc(f.fact)}</span> <span class="text-xs text-gray-400">${esc(f.context || '')}</span></div>`
+    ).join('');
+
+    // Misconceptions
+    const mythsHtml = (research.misconceptions || []).map(m =>
+      `<div class="mb-2 bg-amber-50 rounded p-2">
+        <div class="text-sm"><span class="font-medium text-amber-700">Myth:</span> ${esc(m.myth)}</div>
+        <div class="text-sm"><span class="font-medium text-green-700">Reality:</span> ${esc(m.reality)}</div>
+      </div>`
+    ).join('');
+
+    // Knowledge depth suggestion
+    const depthLabel = research.suggestedKnowledgeDepth || 'standard';
+    const depthColors = { minimal: 'bg-gray-100 text-gray-700', standard: 'bg-blue-100 text-blue-700', comprehensive: 'bg-purple-100 text-purple-700' };
+
+    mainContent.innerHTML = `
+      <div class="max-w-3xl mx-auto fade-in">
+        <div class="bg-white rounded-lg shadow-md p-6">
+          ${agentBadge('scout')}
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-xl font-bold">Research Review</h2>
+            <span class="text-xs px-2 py-1 rounded ${depthColors[depthLabel] || depthColors.standard}">
+              Suggested depth: ${esc(depthLabel)}
+            </span>
+          </div>
+          <p class="text-sm text-gray-500 mb-4">Review the research findings below. You can approve to continue, request changes, or add notes.</p>
+
+          <!-- Source info -->
+          <div class="text-xs text-gray-400 mb-4 flex gap-4">
+            <span>Best practices: ${esc(searchSrc.bestPractices || 'web')}</span>
+            <span>Topic research: ${esc(searchSrc.topicResearch || 'llm')}</span>
+          </div>
+
+          ${collapsibleSection('GPT Best Practices (' + (research.gptBestPractices || []).length + ')', practicesHtml, true)}
+          ${collapsibleSection('Topic Glossary (' + (research.topicGlossary || []).length + ' terms)', glossaryHtml, false)}
+          ${collapsibleSection('User Intents (' + (research.userIntents || []).length + ')', intentsHtml, true)}
+          ${collapsibleSection('Domain Boundaries',
+            '<div class="grid grid-cols-2 gap-4"><div><div class="text-xs font-semibold text-green-600 mb-1">In Scope</div><ul class="list-disc list-inside">' + inScope + '</ul></div><div><div class="text-xs font-semibold text-red-500 mb-1">Out of Scope</div><ul class="list-disc list-inside">' + outScope + '</ul></div></div>',
+            false)}
+          ${collapsibleSection('Key Facts (' + (research.keyFacts || []).length + ')', factsHtml, false)}
+          ${collapsibleSection('Common Misconceptions (' + (research.misconceptions || []).length + ')', mythsHtml, false)}
+
+          ${research.scratchpadNote ? `<div class="bg-blue-50 border border-blue-200 rounded-md p-3 mt-3 text-sm"><span class="font-medium text-blue-700">Scout's note:</span> ${esc(research.scratchpadNote)}</div>` : ''}
+
+          <!-- Feedback -->
+          <div class="mt-5 border-t pt-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Notes for the next agent (optional)</label>
+            <textarea id="researchNotes" class="w-full border border-gray-300 rounded-md p-2 text-sm" rows="2" placeholder="Any corrections, emphasis areas, or things to watch for..."></textarea>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex gap-3 mt-4">
+            <button id="approveResearchBtn" class="flex-1 bg-green-600 text-white py-2 rounded-md hover:bg-green-700 transition-colors font-medium">Approve & Continue</button>
+            <button id="rerunResearchBtn" class="border border-gray-300 px-4 py-2 rounded-md hover:bg-gray-50 transition-colors text-gray-700">Re-run Research</button>
+          </div>
+        </div>
+      </div>`;
+
+    document.getElementById('approveResearchBtn')?.addEventListener('click', () => {
+      const notes = document.getElementById('researchNotes')?.value?.trim() || null;
+      disableActions();
+      pipeline.approveResearch(notes);
+    });
+
+    document.getElementById('rerunResearchBtn')?.addEventListener('click', () => {
+      disableActions();
+      pipeline.rerunResearch();
+    });
   }
 
   function renderPersonaReview(project) {
-    mainContent.innerHTML = '<div class="max-w-2xl mx-auto text-center py-16"><p class="text-gray-500">Persona review — chunk 4</p></div>';
+    if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+    const persona = project?.agentOutputs?.personaDesigner;
+    if (!persona) {
+      mainContent.innerHTML = '<div class="max-w-2xl mx-auto text-center py-16"><p class="text-gray-500">No persona data found.</p></div>';
+      return;
+    }
+
+    // Guardrails
+    const doRules = (persona.guardrails?.do || []).map(r => `<li class="text-sm text-green-700">${esc(r)}</li>`).join('');
+    const dontRules = (persona.guardrails?.dont || []).map(r => `<li class="text-sm text-red-600">${esc(r)}</li>`).join('');
+
+    // Conversation starters
+    const startersHtml = (persona.conversationStarters || []).map(s =>
+      `<div class="bg-gray-50 rounded-md px-3 py-2 text-sm border">${esc(s)}</div>`
+    ).join('');
+
+    mainContent.innerHTML = `
+      <div class="max-w-3xl mx-auto fade-in">
+        <div class="bg-white rounded-lg shadow-md p-6">
+          ${agentBadge('architect')}
+          <h2 class="text-xl font-bold mb-1">Persona Review</h2>
+          <p class="text-sm text-gray-500 mb-4">Review and optionally edit the GPT configuration designed by Architect.</p>
+
+          <!-- Name & Description -->
+          <div class="mb-4">
+            <div class="text-xs font-semibold text-gray-400 uppercase mb-1">GPT Name</div>
+            <div class="text-lg font-bold">${esc(persona.name)}</div>
+          </div>
+          <div class="mb-4">
+            <div class="text-xs font-semibold text-gray-400 uppercase mb-1">Description</div>
+            <div class="text-sm text-gray-700">${esc(persona.description)}</div>
+          </div>
+
+          <!-- System Prompt (editable) -->
+          <div class="mb-4">
+            <div class="flex items-center justify-between mb-1">
+              <div class="text-xs font-semibold text-gray-400 uppercase">System Prompt</div>
+              <span class="text-xs text-gray-400">${(persona.systemPrompt || '').split(/\s+/).length} words</span>
+            </div>
+            <textarea id="systemPromptEdit" class="w-full border border-gray-300 rounded-md p-3 text-sm font-mono leading-relaxed" rows="12">${esc(persona.systemPrompt)}</textarea>
+          </div>
+
+          <!-- Conversation Starters -->
+          ${collapsibleSection('Conversation Starters (' + (persona.conversationStarters || []).length + ')',
+            '<div class="space-y-2">' + startersHtml + '</div>', true)}
+
+          <!-- Guardrails -->
+          ${collapsibleSection('Behavioral Guardrails',
+            '<div class="grid grid-cols-2 gap-4"><div><div class="text-xs font-semibold text-green-600 mb-1">Do</div><ul class="list-disc list-inside space-y-1">' + doRules + '</ul></div><div><div class="text-xs font-semibold text-red-500 mb-1">Don\'t</div><ul class="list-disc list-inside space-y-1">' + dontRules + '</ul></div></div>',
+            true)}
+
+          ${persona.scratchpadNote ? `<div class="bg-purple-50 border border-purple-200 rounded-md p-3 mt-3 text-sm"><span class="font-medium text-purple-700">Architect's note:</span> ${esc(persona.scratchpadNote)}</div>` : ''}
+
+          <!-- Request changes -->
+          <div class="mt-5 border-t pt-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Request changes (optional)</label>
+            <textarea id="personaFeedback" class="w-full border border-gray-300 rounded-md p-2 text-sm" rows="2" placeholder="e.g. Make the tone more casual, add more guardrails about..."></textarea>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex gap-3 mt-4">
+            <button id="approvePersonaBtn" class="flex-1 bg-green-600 text-white py-2 rounded-md hover:bg-green-700 transition-colors font-medium">Approve & Continue</button>
+            <button id="revisePersonaBtn" class="border border-gray-300 px-4 py-2 rounded-md hover:bg-gray-50 transition-colors text-gray-700">Request Changes</button>
+          </div>
+        </div>
+      </div>`;
+
+    document.getElementById('approvePersonaBtn')?.addEventListener('click', () => {
+      const editedPrompt = document.getElementById('systemPromptEdit')?.value?.trim();
+      const original = persona.systemPrompt?.trim();
+      disableActions();
+      // Pass edited prompt only if user actually changed it
+      pipeline.approvePersona(editedPrompt !== original ? editedPrompt : null);
+    });
+
+    document.getElementById('revisePersonaBtn')?.addEventListener('click', () => {
+      const feedback = document.getElementById('personaFeedback')?.value?.trim();
+      if (!feedback) {
+        document.getElementById('personaFeedback')?.focus();
+        return;
+      }
+      disableActions();
+      pipeline.requestPersonaChanges(feedback);
+    });
+  }
+
+  // --- Utility: disable action buttons after click to prevent double-submit ---
+  function disableActions() {
+    mainContent.querySelectorAll('button').forEach(btn => {
+      btn.disabled = true;
+      btn.classList.add('opacity-50', 'cursor-not-allowed');
+    });
   }
 
   // Chunk 5: HITL checkpoints 3 & 4
