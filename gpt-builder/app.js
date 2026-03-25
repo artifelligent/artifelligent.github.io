@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- State ---
   const STAGES = pipeline.STAGES;
   let currentProject = null;
+  let progressTimer = null;
 
   // --- Activity Log Handler ---
   api.setActivityHandler((entry) => {
@@ -640,8 +641,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // =====================================================================
   // CHUNK 3: Progress View + Error View
   // =====================================================================
-
-  let progressTimer = null;
 
   function renderProgressView(agentName, charKey, title, subtitle) {
     // Clear any existing timer
