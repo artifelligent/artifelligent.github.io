@@ -1,22 +1,25 @@
-// pipeline.js — Orchestrator: sequencing, handoffs, state transitions, HITL gating
+// pipeline.js — Orchestrator: sequencing, handoffs, HITL gating, 4 checkpoints + auto mode
 
 const pipeline = (() => {
   const STAGES = {
     IDLE: 'idle',
+    INTERVIEWING: 'interviewing',
     SEARCHING: 'searching',
     RESEARCHING: 'researching',
     HITL_RESEARCH_REVIEW: 'hitl_research_review',
     DESIGNING_PERSONA: 'designing_persona',
+    HITL_PERSONA_REVIEW: 'hitl_persona_review',
     CURATING_KNOWLEDGE: 'curating_knowledge',
     HITL_CONFIG_REVIEW: 'hitl_config_review',
     VALIDATING: 'validating',
+    HITL_RESULTS_REVIEW: 'hitl_results_review',
     COMPLETE: 'complete',
     REVISING: 'revising',
     ERROR: 'error'
   };
 
   let currentProjectId = null;
-  let onStageChange = null; // callback: (stage, project) => void
+  let onStageChange = null;
 
   function setStageChangeHandler(handler) {
     onStageChange = handler;
@@ -38,6 +41,10 @@ const pipeline = (() => {
     return store.loadProject(currentProjectId);
   }
 
+  function _isAutoApprove() {
+    return store.getSettings().autoApprove;
+  }
+
   // --- Pipeline Entry ---
   async function start(projectId) {
     currentProjectId = projectId;
@@ -47,20 +54,17 @@ const pipeline = (() => {
     // Resume from where we left off
     switch (project.currentStage) {
       case STAGES.IDLE:
-        await runSearchPhase();
+      case STAGES.INTERVIEWING:
+        if (onStageChange) onStageChange(project.currentStage, project);
         break;
       case STAGES.HITL_RESEARCH_REVIEW:
-        // Waiting for user — just render the UI
-        if (onStageChange) onStageChange(STAGES.HITL_RESEARCH_REVIEW, project);
-        break;
+      case STAGES.HITL_PERSONA_REVIEW:
       case STAGES.HITL_CONFIG_REVIEW:
-        if (onStageChange) onStageChange(STAGES.HITL_CONFIG_REVIEW, project);
-        break;
+      case STAGES.HITL_RESULTS_REVIEW:
       case STAGES.COMPLETE:
-        if (onStageChange) onStageChange(STAGES.COMPLETE, project);
+        if (onStageChange) onStageChange(project.currentStage, project);
         break;
       default:
-        // If we were mid-agent, restart that stage
         await resumeFromStage(project.currentStage);
     }
   }
@@ -86,6 +90,11 @@ const pipeline = (() => {
     }
   }
 
+  // --- Begin pipeline after intake is complete ---
+  async function beginAfterIntake() {
+    await runSearchPhase();
+  }
+
   // --- Phase 1: Search + Research ---
   async function runSearchPhase() {
     try {
@@ -93,13 +102,17 @@ const pipeline = (() => {
 
       // Step 1: Web search for best practices
       _transition(STAGES.SEARCHING);
-      const bestPractices = await search.fetchGPTBestPractices();
+      const bestPractices = await search.fetchGPTBestPractices(currentProjectId);
       _complete();
 
       // Step 2: Web search for topic
       let topicResearch = null;
       try {
-        topicResearch = await search.researchTopic(project.userTopic, project.topicDescription);
+        topicResearch = await search.researchTopic(
+          project.intake.topic,
+          project.intake.additionalContext || project.intake.topic,
+          currentProjectId
+        );
       } catch (e) {
         console.warn('Topic web search failed, will use LLM knowledge:', e.message);
       }
@@ -107,21 +120,28 @@ const pipeline = (() => {
       // Step 3: Run researcher agent
       _transition(STAGES.RESEARCHING);
       const researchOutput = await agents.runResearcher(
-        project.userTopic,
-        project.topicDescription,
+        project.intake,
         bestPractices.data,
-        topicResearch?.data || null
+        topicResearch?.data || null,
+        currentProjectId
       );
       store.updateAgentOutput(currentProjectId, 'researcher', researchOutput);
 
       // Save search results for reference
       const proj = _getProject();
-      proj.searchResults = { bestPractices: bestPractices.source, topicResearch: topicResearch?.source || 'llm_knowledge' };
+      proj.searchResults = {
+        bestPractices: bestPractices.source,
+        topicResearch: topicResearch?.source || 'llm_knowledge'
+      };
       store.saveProject(proj);
       _complete();
 
-      // Transition to HITL checkpoint 1
-      _transition(STAGES.HITL_RESEARCH_REVIEW);
+      // HITL Checkpoint 1 (or auto-approve)
+      if (_isAutoApprove()) {
+        await approveResearch(null);
+      } else {
+        _transition(STAGES.HITL_RESEARCH_REVIEW);
+      }
     } catch (e) {
       _handleError(e);
     }
@@ -148,64 +168,92 @@ const pipeline = (() => {
     try {
       const project = _getProject();
       const researchOutput = project.agentOutputs.researcher;
+      const scratchpad = project.scratchpad || [];
 
       _transition(STAGES.DESIGNING_PERSONA);
       const personaOutput = await agents.runPersonaDesigner(
         researchOutput,
-        project.userTopic,
-        project.topicDescription,
-        project.hitlNotes.researchReview || null
+        project.intake,
+        project.hitlNotes.researchReview || null,
+        scratchpad,
+        currentProjectId
       );
       store.updateAgentOutput(currentProjectId, 'personaDesigner', personaOutput);
       _complete();
 
-      await runCurationPhase();
+      // HITL Checkpoint 2 (or auto-approve)
+      if (_isAutoApprove()) {
+        await approvePersona(null);
+      } else {
+        _transition(STAGES.HITL_PERSONA_REVIEW);
+      }
     } catch (e) {
       _handleError(e);
     }
+  }
+
+  // --- HITL 2: User approves persona ---
+  async function approvePersona(editedSystemPrompt) {
+    if (editedSystemPrompt) {
+      const project = _getProject();
+      project.userEdits.systemPrompt = editedSystemPrompt;
+      project.agentOutputs.personaDesigner.systemPrompt = editedSystemPrompt;
+      store.saveProject(project);
+    }
+    _complete();
+    await runCurationPhase();
+  }
+
+  async function requestPersonaChanges(feedback) {
+    const project = _getProject();
+    project.hitlNotes.personaReview = feedback;
+    store.saveProject(project);
+    _complete();
+    await runDesignPhase();
   }
 
   // --- Phase 3: Knowledge Curation ---
   async function runCurationPhase() {
     try {
       const project = _getProject();
+      const scratchpad = project.scratchpad || [];
+      const knowledgeDepth = project.approvedKnowledgeDepth || 'standard';
 
       _transition(STAGES.CURATING_KNOWLEDGE);
       const knowledgeOutput = await agents.runKnowledgeCurator(
         project.agentOutputs.researcher,
         project.agentOutputs.personaDesigner,
-        project.userTopic
+        project.intake,
+        scratchpad,
+        knowledgeDepth,
+        currentProjectId
       );
       store.updateAgentOutput(currentProjectId, 'knowledgeCurator', knowledgeOutput);
       _complete();
 
-      // Transition to HITL checkpoint 2
-      _transition(STAGES.HITL_CONFIG_REVIEW);
+      // HITL Checkpoint 3 (or auto-approve)
+      if (_isAutoApprove()) {
+        await approveConfig();
+      } else {
+        _transition(STAGES.HITL_CONFIG_REVIEW);
+      }
     } catch (e) {
       _handleError(e);
     }
   }
 
-  // --- HITL 2: User approves config ---
-  async function approveConfig(editedSystemPrompt) {
-    if (editedSystemPrompt) {
-      const project = _getProject();
-      project.userEdits.systemPrompt = editedSystemPrompt;
-      // Also update the persona output so validator tests the edited version
-      project.agentOutputs.personaDesigner.systemPrompt = editedSystemPrompt;
-      store.saveProject(project);
-    }
+  // --- HITL 3: User approves knowledge docs ---
+  async function approveConfig() {
     _complete();
     await runValidationPhase();
   }
 
-  async function requestConfigChanges(feedback) {
+  async function requestKnowledgeChanges(feedback) {
     const project = _getProject();
     project.hitlNotes.configReview = feedback;
     store.saveProject(project);
     _complete();
-    // Re-run persona designer and knowledge curator with feedback
-    await runDesignPhase();
+    await runCurationPhase();
   }
 
   // --- Phase 4: Validation ---
@@ -217,29 +265,55 @@ const pipeline = (() => {
       const validatorOutput = await agents.runValidator(
         project.agentOutputs.personaDesigner,
         project.agentOutputs.knowledgeCurator,
-        project.userTopic
+        project.intake,
+        project.guardrailCategories || ['topic_boundaries'],
+        project.scratchpad || [],
+        currentProjectId
       );
       store.updateAgentOutput(currentProjectId, 'validator', validatorOutput);
       _complete();
 
-      _transition(STAGES.COMPLETE);
+      // HITL Checkpoint 4 (or auto to complete)
+      if (_isAutoApprove()) {
+        _transition(STAGES.COMPLETE);
+      } else {
+        _transition(STAGES.HITL_RESULTS_REVIEW);
+      }
     } catch (e) {
       _handleError(e);
     }
   }
 
+  // --- HITL 4: User approves QA results ---
+  async function approveResults() {
+    _complete();
+    _transition(STAGES.COMPLETE);
+  }
+
   // --- Revision Loop ---
-  async function revise(feedback) {
+  async function revise(feedback, targetAgent) {
     const project = _getProject();
     project.revisions.push({
       timestamp: new Date().toISOString(),
       feedback,
-      agentsRerun: ['personaDesigner', 'knowledgeCurator', 'validator']
+      targetAgent: targetAgent || 'personaDesigner'
     });
-    project.hitlNotes.configReview = feedback;
+    project.hitlNotes.revision = feedback;
     store.saveProject(project);
     _transition(STAGES.REVISING);
-    await runDesignPhase();
+
+    if (targetAgent === 'researcher') {
+      await runSearchPhase();
+    } else if (targetAgent === 'knowledgeCurator') {
+      project.hitlNotes.configReview = feedback;
+      store.saveProject(project);
+      await runCurationPhase();
+    } else {
+      // Default: re-run from persona designer
+      project.hitlNotes.personaReview = feedback;
+      store.saveProject(project);
+      await runDesignPhase();
+    }
   }
 
   // --- Error Handling ---
@@ -259,10 +333,14 @@ const pipeline = (() => {
   return {
     STAGES,
     start,
+    beginAfterIntake,
     approveResearch,
     rerunResearch,
+    approvePersona,
+    requestPersonaChanges,
     approveConfig,
-    requestConfigChanges,
+    requestKnowledgeChanges,
+    approveResults,
     revise,
     setStageChangeHandler,
     getCurrentProjectId,

@@ -1,4 +1,4 @@
-// search.js — Web search integration for GPT best practices
+// search.js — Web search integration for GPT best practices (provider-native)
 
 const search = (() => {
 
@@ -23,7 +23,7 @@ const search = (() => {
 
 ### Conversation Starters
 10. Provide 4 conversation starters that demonstrate the GPT's range of capabilities
-11. Make starters specific and actionable, not generic ("Help me create a weekly meal plan for a family of 4" vs "Help me with cooking")
+11. Make starters specific and actionable, not generic
 
 ### Guardrails & Safety
 12. Explicitly instruct the GPT to stay in its lane — redirect off-topic queries politely
@@ -40,8 +40,7 @@ const search = (() => {
    * Fetch GPT best practices using OpenAI's web search tool.
    * Falls back to cached practices if search is unavailable.
    */
-  async function fetchGPTBestPractices() {
-    // Try provider-native web search first
+  async function fetchGPTBestPractices(projectId) {
     try {
       const result = await api.callLLM(
         `You are a research assistant. Search the web for the latest best practices for building custom GPTs (OpenAI custom GPTs). Focus on:
@@ -54,29 +53,27 @@ const search = (() => {
 Summarize your findings as a comprehensive, actionable guide. Include specific tips and examples where possible. Format as Markdown.`,
         'Find the latest best practices for building custom GPTs in 2026. Search for recent guides, tips, and recommendations.',
         {
-          tools: [{ type: 'web_search_preview' }]
+          tools: [{ type: 'web_search_preview' }],
+          agentName: 'Scout',
+          projectId,
+          model: api.getModelForRole('research')
         }
       );
 
       if (result && result.length > 100) {
-        return {
-          source: 'web_search',
-          timestamp: new Date().toISOString(),
-          data: result
-        };
+        return { source: 'web_search', timestamp: new Date().toISOString(), data: result };
       }
     } catch (e) {
       console.warn('Web search failed, falling back to cached practices:', e.message);
     }
 
-    // Fallback to cached practices
     return { ...CACHED_BEST_PRACTICES };
   }
 
   /**
    * Research a specific topic using web search.
    */
-  async function researchTopic(topic, description) {
+  async function researchTopic(topic, description, projectId) {
     try {
       const result = await api.callLLM(
         `You are a research assistant. Search the web to gather comprehensive information about the following topic. Your goal is to collect enough domain knowledge to build an expert AI assistant on this topic.
@@ -92,16 +89,15 @@ Focus on:
 Format your findings as structured Markdown with clear sections.`,
         `Research this topic thoroughly: "${topic}"\n\nAdditional context: ${description}\n\nSearch for comprehensive, up-to-date information about this topic.`,
         {
-          tools: [{ type: 'web_search_preview' }]
+          tools: [{ type: 'web_search_preview' }],
+          agentName: 'Scout',
+          projectId,
+          model: api.getModelForRole('research')
         }
       );
 
       if (result && result.length > 100) {
-        return {
-          source: 'web_search',
-          timestamp: new Date().toISOString(),
-          data: result
-        };
+        return { source: 'web_search', timestamp: new Date().toISOString(), data: result };
       }
     } catch (e) {
       console.warn('Topic research web search failed:', e.message);
