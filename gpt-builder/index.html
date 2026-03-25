@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPT Builder — Multi-Agent Pipeline</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563eb">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .animate-spin { animation: spin 1s linear infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .animate-pulse { animation: pulse 2s ease-in-out infinite; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+        .diff-added { background-color: #dcfce7; }
+        .diff-removed { background-color: #fee2e2; text-decoration: line-through; }
+        .agent-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+        .activity-log { max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px; }
+        .activity-log .log-entry { padding: 2px 8px; border-bottom: 1px solid #f3f4f6; }
+        .activity-log .log-info { color: #6b7280; }
+        .activity-log .log-success { color: #16a34a; }
+        .activity-log .log-warn { color: #d97706; }
+        .activity-log .log-error { color: #dc2626; }
+        .chat-bubble-user { background: #eff6ff; border-radius: 16px 16px 4px 16px; }
+        .chat-bubble-assistant { background: #f9fafb; border-radius: 16px 16px 16px 4px; }
+        .tooltip-highlight { position: relative; }
+        .tooltip-highlight::after { content: ''; position: absolute; inset: -4px; border: 2px solid #3b82f6; border-radius: 8px; pointer-events: none; animation: pulse 1.5s ease-in-out infinite; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col">
+
+    <!-- Top Bar -->
+    <header class="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between z-40 relative">
+        <div class="flex items-center gap-3">
+            <button id="sidebarToggle" class="md:hidden text-gray-500 hover:text-gray-700">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                </svg>
+            </button>
+            <h1 class="text-lg font-bold text-gray-800">GPT Builder</h1>
+            <a href="/flashcards.html" class="text-xs text-blue-500 hover:underline hidden sm:inline">Flashcards</a>
+        </div>
+        <div class="flex items-center gap-3">
+            <!-- Cost Tracker -->
+            <div id="costTracker" class="hidden text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                <span id="costAmount">$0.00</span> &middot; <span id="callCount">0</span> calls
+            </div>
+            <!-- Auto-approve toggle -->
+            <label class="flex items-center gap-1.5 cursor-pointer" title="Skip HITL checkpoints">
+                <span class="text-xs text-gray-500 hidden sm:inline">Auto</span>
+                <div class="relative">
+                    <input type="checkbox" id="autoApproveToggle" class="sr-only peer">
+                    <div class="w-8 h-4 bg-gray-300 peer-checked:bg-blue-600 rounded-full transition-colors"></div>
+                    <div class="absolute left-0.5 top-0.5 w-3 h-3 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
+                </div>
+            </label>
+            <div class="flex items-center gap-1.5">
+                <span id="apiKeyIndicator" class="w-2.5 h-2.5 rounded-full bg-red-500" title="No API key set"></span>
+                <span class="text-xs text-gray-500 hidden sm:inline">API Key</span>
+            </div>
+            <button id="settingsBtn" class="text-gray-500 hover:text-gray-700" title="Settings">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <!-- Sidebar -->
+        <aside id="sidebar" class="w-64 bg-white border-r border-gray-200 flex-shrink-0 flex flex-col fixed md:relative inset-y-0 left-0 z-30 transform -translate-x-full md:translate-x-0 transition-transform duration-200 mt-[53px] md:mt-0">
+            <div class="p-4 flex-1 overflow-y-auto">
+                <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Pipeline</h3>
+                <nav class="space-y-1" id="pipelineStepper">
+                    <div class="pipeline-step flex items-center gap-2 py-1.5 text-gray-400" data-stage="interviewing">
+                        <span class="step-icon w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0"></span>
+                        <span class="step-label text-sm flex items-center gap-1"><span>&#x1F5E3;&#xFE0F;</span> Intake</span>
+                    </div>
+                    <div class="pipeline-step flex items-center gap-2 py-1.5 text-gray-400" data-stage="searching">
+                        <span class="step-icon w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0"></span>
+                        <span class="step-label text-sm flex items-center gap-1"><span>&#x1F50D;</span> Web Search</span>
+                    </div>
+                    <div class="pipeline-step flex items-center gap-2 py-1.5 text-gray-400" data-stage="researching">
+                        <span class="step-icon w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0"></span>
+                        <span class="step-label text-sm flex items-center gap-1"><span>&#x1F50D;</span> Scout: Research</span>
+                    </div>
+                    <div class="pipeline-step flex items-center gap-2 py-1.5 text-gray-400" data-stage="hitl_research_review">
+                        <span class="step-icon w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0"></span>
+                        <span class="step-label text-sm">Review Research</span>
+                    </div>
+                    <div class="pipeline-step flex items-center gap-2 py-1.5 text-gray-400" data-stage="designing_persona">
+                        <span class="step-icon w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0"></span>
+                        <span class="step-label text-sm flex items-center gap-1"><span>&#x1F3D7;&#xFE0F;</span> Architect: Design</span>
+                    </div>
+                    <div class="pipeline-step flex items-center gap-2 py-1.5 text-gray-400" data-stage="hitl_persona_review">
+                        <span class="step-icon w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0"></span>
+                        <span class="step-label text-sm">Review Persona</span>
+                    </div>
+                    <div class="pipeline-step flex items-center gap-2 py-1.5 text-gray-400" data-stage="curating_knowledge">
+                        <span class="step-icon w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0"></span>
+                        <span class="step-label text-sm flex items-center gap-1"><span>&#x1F4DA;</span> Librarian: Curate</span>
+                    </div>
+                    <div class="pipeline-step flex items-center gap-2 py-1.5 text-gray-400" data-stage="hitl_config_review">
+                        <span class="step-icon w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0"></span>
+                        <span class="step-label text-sm">Review Knowledge</span>
+                    </div>
+                    <div class="pipeline-step flex items-center gap-2 py-1.5 text-gray-400" data-stage="validating">
+                        <span class="step-icon w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0"></span>
+                        <span class="step-label text-sm flex items-center gap-1"><span>&#x1F52C;</span> Inspector: Validate</span>
+                    </div>
+                    <div class="pipeline-step flex items-center gap-2 py-1.5 text-gray-400" data-stage="hitl_results_review">
+                        <span class="step-icon w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0"></span>
+                        <span class="step-label text-sm">Review Results</span>
+                    </div>
+                    <div class="pipeline-step flex items-center gap-2 py-1.5 text-gray-400" data-stage="complete">
+                        <span class="step-icon w-5 h-5 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0"></span>
+                        <span class="step-label text-sm">Complete</span>
+                    </div>
+                </nav>
+
+                <hr class="my-4 border-gray-200">
+
+                <!-- Activity Log -->
+                <details class="mb-4">
+                    <summary class="text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer">Activity Log</summary>
+                    <div id="activityLog" class="activity-log mt-2 bg-gray-50 rounded border text-xs">
+                        <div class="log-entry log-info p-2 text-gray-400">Waiting to start...</div>
+                    </div>
+                </details>
+
+                <hr class="my-4 border-gray-200">
+
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Projects</h3>
+                    <button id="newProjectBtn" class="text-xs text-blue-500 hover:text-blue-700">+ New</button>
+                </div>
+                <div id="projectList" class="space-y-1">
+                    <p class="text-xs text-gray-400 px-2">No projects yet</p>
+                </div>
+
+                <hr class="my-4 border-gray-200">
+
+                <!-- Gist Sync -->
+                <div class="space-y-2">
+                    <button id="gistSaveBtn" class="w-full text-xs text-gray-500 border border-gray-200 rounded px-2 py-1 hover:bg-gray-50">Save to GitHub Gist</button>
+                    <button id="gistLoadBtn" class="w-full text-xs text-gray-500 border border-gray-200 rounded px-2 py-1 hover:bg-gray-50">Load from Gist</button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main id="mainContent" class="flex-1 p-4 sm:p-6 overflow-y-auto">
+            <!-- Content rendered by app.js -->
+        </main>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-bold">Settings</h2>
+                <button id="settingsClose" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+            </div>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">API Provider</label>
+                    <select id="providerSelect" class="w-full border border-gray-300 rounded-md p-2 text-sm">
+                        <option value="openai">OpenAI</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                    <div class="relative">
+                        <input type="password" id="apiKeyInput" class="w-full border border-gray-300 rounded-md p-2 pr-10 text-sm font-mono" placeholder="sk-...">
+                        <button id="toggleKeyVisibility" class="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs" type="button">Show</button>
+                    </div>
+                </div>
+
+                <div class="flex gap-2">
+                    <button id="testConnectionBtn" class="flex-1 bg-gray-100 border border-gray-300 text-gray-700 px-3 py-2 rounded-md hover:bg-gray-200 transition-colors text-sm">Test Connection</button>
+                    <button id="clearKeyBtn" class="px-3 py-2 border border-red-200 text-red-600 rounded-md hover:bg-red-50 transition-colors text-sm">Clear Key</button>
+                </div>
+
+                <div id="connectionStatus" class="text-sm mt-2"></div>
+
+                <hr>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">GitHub Token (for Gist sync, optional)</label>
+                    <input type="password" id="gistTokenInput" class="w-full border border-gray-300 rounded-md p-2 text-sm font-mono" placeholder="ghp_...">
+                    <p class="text-xs text-gray-400 mt-1">Needs 'gist' scope. Used to save/load projects as GitHub Gists.</p>
+                </div>
+
+                <hr>
+
+                <p class="text-xs text-gray-400">Your keys are stored in your browser's localStorage. They never leave your device except to call the respective APIs directly. Do not use this on shared/public computers.</p>
+
+                <button id="saveSettingsBtn" class="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 transition-colors font-medium">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tooltip Tour Overlay -->
+    <div id="tooltipOverlay" class="hidden fixed inset-0 bg-black bg-opacity-30 z-50 flex items-center justify-center">
+        <div id="tooltipCard" class="bg-white rounded-lg shadow-xl p-6 max-w-sm mx-4">
+            <h3 id="tooltipTitle" class="font-bold mb-2"></h3>
+            <p id="tooltipText" class="text-sm text-gray-600 mb-4"></p>
+            <div class="flex justify-between items-center">
+                <span id="tooltipProgress" class="text-xs text-gray-400"></span>
+                <div class="flex gap-2">
+                    <button id="tooltipSkip" class="text-xs text-gray-400 hover:text-gray-600">Skip Tour</button>
+                    <button id="tooltipNext" class="bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700">Next</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts in dependency order -->
+    <script src="store.js"></script>
+    <script src="api.js"></script>
+    <script src="search.js"></script>
+    <script src="agents.js"></script>
+    <script src="pipeline.js"></script>
+    <script src="app.js"></script>
+
+    <script>
+        // Toggle API key visibility
+        document.getElementById('toggleKeyVisibility').addEventListener('click', function() {
+            const input = document.getElementById('apiKeyInput');
+            if (input.type === 'password') {
+                input.type = 'text';
+                this.textContent = 'Hide';
+            } else {
+                input.type = 'password';
+                this.textContent = 'Show';
+            }
+        });
+    </script>
+</body>
+</html>
