@@ -1251,9 +1251,278 @@ document.addEventListener('DOMContentLoaded', () => {
     return `<span class="text-xs px-1.5 py-0.5 rounded ${color}" title="${label}: ${score}/5">${label}${score}</span>`;
   }
 
-  // Chunk 6: Complete view with guided export
+  // =====================================================================
+  // CHUNK 6: Complete View with Guided Export
+  // =====================================================================
+
   function renderComplete(project) {
-    mainContent.innerHTML = '<div class="max-w-2xl mx-auto text-center py-16"><p class="text-gray-500">Complete view — chunk 6</p></div>';
+    if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+    const persona = project?.agentOutputs?.personaDesigner;
+    const knowledge = project?.agentOutputs?.knowledgeCurator;
+    const validator = project?.agentOutputs?.validator;
+    const cost = project?.costTracking;
+
+    if (!persona) {
+      mainContent.innerHTML = '<div class="max-w-2xl mx-auto text-center py-16"><p class="text-gray-500">No configuration data found.</p></div>';
+      return;
+    }
+
+    const overallScore = validator?.overallScore || '—';
+    const scoreColor = overallScore >= 4 ? 'text-green-600' : overallScore >= 3 ? 'text-yellow-600' : 'text-gray-600';
+
+    // Conversation starters
+    const startersHtml = (persona.conversationStarters || []).map(s =>
+      `<div class="bg-blue-50 border border-blue-200 rounded-md px-3 py-2 text-sm">${esc(s)}</div>`
+    ).join('');
+
+    // Guardrails summary
+    const doRules = (persona.guardrails?.do || []).map(r => `<li class="text-sm">${esc(r)}</li>`).join('');
+    const dontRules = (persona.guardrails?.dont || []).map(r => `<li class="text-sm">${esc(r)}</li>`).join('');
+
+    // Knowledge docs list
+    const docKeys = [
+      { key: 'faqDocument', label: 'FAQ Document', filename: 'faq.md' },
+      { key: 'referenceGuide', label: 'Reference Guide', filename: 'reference-guide.md' },
+      { key: 'edgeCases', label: 'Edge Cases', filename: 'edge-cases.md' },
+      { key: 'quickReference', label: 'Quick Reference', filename: 'quick-reference.md' },
+      { key: 'sampleConversations', label: 'Sample Conversations', filename: 'sample-conversations.md' },
+      { key: 'troubleshootingGuide', label: 'Troubleshooting Guide', filename: 'troubleshooting.md' }
+    ];
+    const availableDocs = knowledge ? docKeys.filter(d => knowledge[d.key]) : [];
+
+    const docsListHtml = availableDocs.map(d => {
+      const wordCount = knowledge[d.key].split(/\s+/).length;
+      return `<div class="flex items-center justify-between py-2 border-b last:border-b-0">
+        <span class="text-sm">${esc(d.label)} <span class="text-xs text-gray-400">(${wordCount} words)</span></span>
+        <button class="download-doc-btn text-xs text-blue-600 hover:text-blue-800" data-key="${d.key}" data-filename="${d.filename}">Download</button>
+      </div>`;
+    }).join('');
+
+    // Cost summary
+    const costHtml = cost && cost.totalCalls > 0
+      ? `<div class="flex items-center gap-4 text-sm text-gray-500">
+          <span>${cost.totalCalls} API calls</span>
+          <span>${(cost.totalTokensIn + cost.totalTokensOut).toLocaleString()} tokens</span>
+          <span>~$${cost.estimatedCostUsd.toFixed(4)}</span>
+        </div>`
+      : '';
+
+    // Stage history timeline
+    const stageLabels = {
+      idle: 'Created', interviewing: 'Interview', searching: 'Web Search', researching: 'Research',
+      hitl_research_review: 'Research Review', designing_persona: 'Persona Design',
+      hitl_persona_review: 'Persona Review', curating_knowledge: 'Knowledge Curation',
+      hitl_config_review: 'Config Review', validating: 'Validation',
+      hitl_results_review: 'Results Review', complete: 'Complete', revising: 'Revision'
+    };
+    const timelineHtml = (project.stageHistory || []).map((entry, i) => {
+      const label = stageLabels[entry.stage] || entry.stage;
+      const time = new Date(entry.enteredAt).toLocaleTimeString();
+      return `<div class="flex items-center gap-2 text-xs">
+        <div class="w-2 h-2 rounded-full ${i === project.stageHistory.length - 1 ? 'bg-green-500' : 'bg-gray-300'}"></div>
+        <span class="text-gray-500">${time}</span>
+        <span>${esc(label)}</span>
+      </div>`;
+    }).join('');
+
+    const slug = slugify(persona.name);
+
+    mainContent.innerHTML = `
+      <div class="max-w-3xl mx-auto fade-in">
+        <div class="bg-white rounded-lg shadow-md p-6">
+          <!-- Header -->
+          <div class="text-center mb-6">
+            <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 mb-3">
+              <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+            </div>
+            <h2 class="text-2xl font-bold mb-1">${esc(persona.name)}</h2>
+            <p class="text-gray-500 text-sm">${esc(persona.description)}</p>
+            <div class="flex items-center justify-center gap-3 mt-2">
+              <span class="${scoreColor} text-sm font-medium">Score: ${overallScore}/5</span>
+              ${costHtml}
+            </div>
+          </div>
+
+          <!-- Step-by-Step Export Guide -->
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-5">
+            <h3 class="font-semibold text-sm text-blue-800 mb-2">How to Create Your GPT in ChatGPT</h3>
+            <ol class="list-decimal list-inside text-sm text-blue-900 space-y-1">
+              <li>Go to <span class="font-mono text-xs bg-blue-100 px-1 rounded">chatgpt.com/gpts/editor</span></li>
+              <li>Click <strong>Create</strong> tab, then switch to <strong>Configure</strong></li>
+              <li>Paste the <strong>Name</strong> and <strong>Description</strong> below</li>
+              <li>Paste the <strong>System Prompt</strong> into the "Instructions" field</li>
+              <li>Add the <strong>Conversation Starters</strong></li>
+              <li>Upload the <strong>Knowledge Files</strong> (download all below)</li>
+              <li>Click <strong>Save</strong> and choose your sharing preference</li>
+            </ol>
+          </div>
+
+          <!-- GPT Name & Description -->
+          <div class="mb-4">
+            <div class="flex items-center justify-between mb-1">
+              <div class="text-xs font-semibold text-gray-400 uppercase">Name</div>
+              <button class="copy-field-btn text-xs text-blue-600 hover:text-blue-800" data-copy="${esc(persona.name).replace(/"/g, '&quot;')}">Copy</button>
+            </div>
+            <div class="bg-gray-50 rounded-md p-3 text-lg font-bold">${esc(persona.name)}</div>
+          </div>
+          <div class="mb-4">
+            <div class="flex items-center justify-between mb-1">
+              <div class="text-xs font-semibold text-gray-400 uppercase">Description</div>
+              <button class="copy-field-btn text-xs text-blue-600 hover:text-blue-800" data-copy="${esc(persona.description).replace(/"/g, '&quot;')}">Copy</button>
+            </div>
+            <div class="bg-gray-50 rounded-md p-3 text-sm">${esc(persona.description)}</div>
+          </div>
+
+          <!-- System Prompt -->
+          <div class="mb-4">
+            <div class="flex items-center justify-between mb-1">
+              <div class="text-xs font-semibold text-gray-400 uppercase">System Prompt (Instructions)</div>
+              <button id="copySystemPrompt" class="text-xs text-blue-600 hover:text-blue-800">Copy</button>
+            </div>
+            <pre class="bg-gray-50 rounded-md p-3 text-sm font-mono whitespace-pre-wrap max-h-48 overflow-y-auto border">${esc(persona.systemPrompt)}</pre>
+          </div>
+
+          <!-- Conversation Starters -->
+          ${collapsibleSection('Conversation Starters (' + (persona.conversationStarters || []).length + ')',
+            '<div class="space-y-2">' + startersHtml + '</div>', true)}
+
+          <!-- Guardrails Reference -->
+          ${collapsibleSection('Behavioral Guardrails',
+            '<div class="grid grid-cols-2 gap-4"><div><div class="text-xs font-semibold text-green-600 mb-1">Do</div><ul class="list-disc list-inside space-y-1">' + doRules + '</ul></div><div><div class="text-xs font-semibold text-red-500 mb-1">Don\'t</div><ul class="list-disc list-inside space-y-1">' + dontRules + '</ul></div></div>',
+            false)}
+
+          <!-- Knowledge Files -->
+          ${availableDocs.length > 0 ? collapsibleSection(
+            'Knowledge Files (' + availableDocs.length + ')',
+            '<div>' + docsListHtml + '</div><div class="mt-3"><button id="downloadAllDocs" class="w-full bg-gray-100 text-gray-700 py-2 rounded-md hover:bg-gray-200 transition-colors text-sm font-medium">Download All as ZIP</button></div>',
+            true
+          ) : ''}
+
+          <!-- Build Timeline -->
+          ${collapsibleSection('Build Timeline',
+            '<div class="space-y-1">' + timelineHtml + '</div>',
+            false)}
+
+          <!-- Export Actions -->
+          <div class="mt-5 border-t pt-4">
+            <div class="grid grid-cols-2 gap-3">
+              <button id="exportJsonBtn" class="bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 transition-colors text-sm font-medium">Export Full Config (JSON)</button>
+              <button id="copyAllBtn" class="border border-gray-300 py-2 rounded-md hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700">Copy All to Clipboard</button>
+            </div>
+            <div class="flex gap-3 mt-3">
+              <button id="newProjectBtn" class="flex-1 text-sm text-blue-600 hover:text-blue-800 py-2">Start New Project</button>
+              <button id="reviseFromCompleteBtn" class="flex-1 text-sm text-gray-500 hover:text-gray-700 py-2">Revise This GPT</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+
+    // --- Wire up all interactions ---
+
+    // Copy field buttons (name, description)
+    mainContent.querySelectorAll('.copy-field-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(btn.dataset.copy).then(() => {
+          const orig = btn.textContent;
+          btn.textContent = 'Copied!';
+          setTimeout(() => { btn.textContent = orig; }, 2000);
+        });
+      });
+    });
+
+    // Copy system prompt
+    document.getElementById('copySystemPrompt')?.addEventListener('click', () => {
+      const btn = document.getElementById('copySystemPrompt');
+      navigator.clipboard.writeText(persona.systemPrompt).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+      });
+    });
+
+    // Download individual docs
+    mainContent.querySelectorAll('.download-doc-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.key;
+        const filename = btn.dataset.filename;
+        downloadFile(filename, knowledge[key]);
+      });
+    });
+
+    // Download all docs as ZIP (falls back to individual downloads if no JSZip)
+    document.getElementById('downloadAllDocs')?.addEventListener('click', () => {
+      availableDocs.forEach(d => {
+        downloadFile(`${slug}-${d.filename}`, knowledge[d.key]);
+      });
+    });
+
+    // Export full JSON
+    document.getElementById('exportJsonBtn')?.addEventListener('click', () => {
+      const exportData = {
+        name: persona.name,
+        description: persona.description,
+        systemPrompt: persona.systemPrompt,
+        conversationStarters: persona.conversationStarters,
+        guardrails: persona.guardrails,
+        knowledgeDocs: {},
+        validationScore: validator?.overallScore || null,
+        metadata: {
+          createdAt: project.createdAt,
+          topic: project.intake?.topic,
+          costUsd: cost?.estimatedCostUsd || 0,
+          apiCalls: cost?.totalCalls || 0
+        }
+      };
+      availableDocs.forEach(d => { exportData.knowledgeDocs[d.key] = knowledge[d.key]; });
+      downloadFile(`${slug}-config.json`, JSON.stringify(exportData, null, 2));
+    });
+
+    // Copy all to clipboard
+    document.getElementById('copyAllBtn')?.addEventListener('click', () => {
+      const btn = document.getElementById('copyAllBtn');
+      const allText = [
+        `# ${persona.name}`,
+        `\n${persona.description}`,
+        `\n## System Prompt\n${persona.systemPrompt}`,
+        `\n## Conversation Starters\n${(persona.conversationStarters || []).map((s, i) => `${i + 1}. ${s}`).join('\n')}`,
+        `\n## Guardrails\n### Do\n${(persona.guardrails?.do || []).map(r => `- ${r}`).join('\n')}`,
+        `### Don't\n${(persona.guardrails?.dont || []).map(r => `- ${r}`).join('\n')}`
+      ].join('\n');
+      navigator.clipboard.writeText(allText).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy All to Clipboard'; }, 2000);
+      });
+    });
+
+    // New project
+    document.getElementById('newProjectBtn')?.addEventListener('click', () => {
+      currentProject = null;
+      pipeline.setCurrentProjectId(null);
+      updateStepper('idle');
+      renderIdleView();
+    });
+
+    // Revise from complete
+    document.getElementById('reviseFromCompleteBtn')?.addEventListener('click', () => {
+      pipeline.setCurrentProjectId(project.id);
+      currentProject = project;
+      // Go back to results review so user can provide feedback
+      store.updateStage(project.id, 'hitl_results_review');
+      updateStepper('hitl_results_review');
+      renderResultsReview(store.loadProject(project.id));
+    });
+  }
+
+  // --- File download helper ---
+  function downloadFile(filename, content) {
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   // --- Error View ---
