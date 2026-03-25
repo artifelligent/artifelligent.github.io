@@ -65,9 +65,17 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // --- Init ---
-  updateApiKeyIndicator();
-  renderProjectList();
-  loadLastProject();
+  try {
+    updateApiKeyIndicator();
+    renderProjectList();
+    loadLastProject();
+  } catch (e) {
+    console.error('Init error:', e);
+    mainContent.innerHTML = `<div class="max-w-2xl mx-auto mt-8 bg-red-50 border border-red-200 rounded-lg p-4">
+      <h2 class="font-bold text-red-700 mb-2">Startup Error</h2>
+      <pre class="text-sm text-red-600 whitespace-pre-wrap">${e.message}\n${e.stack}</pre>
+    </div>`;
+  }
 
   // --- Settings Modal ---
   settingsBtn.addEventListener('click', () => {
