@@ -411,32 +411,225 @@ document.addEventListener('DOMContentLoaded', () => {
   // PLACEHOLDER FUNCTIONS — will be implemented in subsequent chunks
   // =====================================================================
 
-  // Chunk 2: Intake wizard
+  // =====================================================================
+  // CHUNK 2: Idle View + LLM-Powered Intake Wizard
+  // =====================================================================
+
   function renderIdleView() {
     const hasKey = !!store.getApiKey();
     mainContent.innerHTML = `
       <div class="max-w-2xl mx-auto">
-        <div class="bg-white rounded-lg shadow-md p-6">
+        <div class="bg-white rounded-lg shadow-md p-6 text-center">
+          ${agentBadge('interviewer')}
           <h2 class="text-2xl font-bold mb-2">Build a Custom GPT</h2>
           <p class="text-gray-600 mb-6">Our team of AI agents will interview you about your idea, then research, design, curate knowledge, and validate a complete GPT configuration.</p>
+          <div class="flex items-center justify-center gap-6 mb-6 text-sm text-gray-500">
+            <div class="flex items-center gap-1"><span class="text-lg">\uD83D\uDD0D</span> Scout</div>
+            <div class="flex items-center gap-1"><span class="text-lg">\uD83C\uDFD7\uFE0F</span> Architect</div>
+            <div class="flex items-center gap-1"><span class="text-lg">\uD83D\uDCDA</span> Librarian</div>
+            <div class="flex items-center gap-1"><span class="text-lg">\uD83D\uDD2C</span> Inspector</div>
+          </div>
           ${!hasKey ? '<div class="bg-yellow-50 border border-yellow-200 rounded-md p-3 mb-4 text-sm text-yellow-800">Please configure your API key in settings before starting.</div>' : ''}
           <button id="startWizardBtn" class="w-full bg-blue-600 text-white py-3 rounded-md hover:bg-blue-700 transition-colors font-medium ${!hasKey ? 'opacity-50 cursor-not-allowed' : ''}" ${!hasKey ? 'disabled' : ''}>
             Start Building
           </button>
-          <p class="text-xs text-gray-400 mt-3 text-center">Guide will ask you a few questions to understand what GPT you want to build.</p>
+          <p class="text-xs text-gray-400 mt-3">\uD83D\uDDE3\uFE0F Guide will ask you a few questions to understand what GPT you want to build.</p>
         </div>
       </div>`;
     const btn = document.getElementById('startWizardBtn');
     if (btn && hasKey) {
-      btn.addEventListener('click', () => {
-        // Placeholder — chunk 2 will implement the full wizard
-        mainContent.innerHTML = '<div class="max-w-2xl mx-auto text-center py-16"><p class="text-gray-500">Intake wizard loading... (chunk 2)</p></div>';
-      });
+      btn.addEventListener('click', startIntakeWizard);
     }
   }
 
+  // --- Intake Wizard State ---
+  let wizardConversation = []; // { role: 'user'|'assistant', content: string }
+  let wizardProjectId = null;
+  let wizardBusy = false;
+
+  function startIntakeWizard() {
+    wizardConversation = [];
+    wizardBusy = false;
+    // Create a project stub so we can track costs
+    const stub = store.createProject({ topic: '(interviewing)', audience: '', tone: '', mustHaves: '', avoid: '', additionalContext: '' });
+    wizardProjectId = stub.id;
+    currentProject = stub;
+    pipeline.setCurrentProjectId(stub.id);
+    store.updateStage(stub.id, 'interviewing');
+    updateStepper('interviewing');
+    renderProjectList();
+    renderWizardUI();
+    // Kick off the first agent message
+    sendWizardTurn(null);
+  }
+
   function renderInterviewView(project) {
-    mainContent.innerHTML = '<div class="max-w-2xl mx-auto text-center py-16"><p class="text-gray-500">Interview view — chunk 2</p></div>';
+    // Resuming an in-progress interview
+    wizardProjectId = project.id;
+    wizardConversation = project.intake?.rawConversation || [];
+    wizardBusy = false;
+    renderWizardUI();
+  }
+
+  function renderWizardUI() {
+    mainContent.innerHTML = `
+      <div class="max-w-2xl mx-auto flex flex-col" style="height: calc(100vh - 120px)">
+        <div class="bg-white rounded-t-lg shadow-md p-4 flex items-center gap-2 border-b">
+          ${agentBadge('interviewer')}
+        </div>
+        <div id="wizardChat" class="flex-1 overflow-y-auto bg-white px-4 py-3 space-y-3">
+          ${wizardConversation.map(msg => chatBubble(msg.role, msg.content)).join('')}
+        </div>
+        <div class="bg-white rounded-b-lg shadow-md p-3 border-t">
+          <div class="flex gap-2">
+            <input type="text" id="wizardInput" class="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm" placeholder="Type your answer..." />
+            <button id="wizardSendBtn" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors text-sm font-medium">Send</button>
+          </div>
+          <div class="flex justify-between mt-2">
+            <span id="wizardStatus" class="text-xs text-gray-400"></span>
+            <button id="wizardDoneBtn" class="text-xs text-blue-500 hover:text-blue-700 hidden">I'm done, start building &rarr;</button>
+          </div>
+        </div>
+      </div>`;
+
+    const input = document.getElementById('wizardInput');
+    const sendBtn = document.getElementById('wizardSendBtn');
+    const doneBtn = document.getElementById('wizardDoneBtn');
+
+    // Show done button after at least 2 user messages
+    const userMsgCount = wizardConversation.filter(m => m.role === 'user').length;
+    if (userMsgCount >= 2) doneBtn.classList.remove('hidden');
+
+    sendBtn.addEventListener('click', () => {
+      const text = input.value.trim();
+      if (!text || wizardBusy) return;
+      input.value = '';
+      sendWizardTurn(text);
+    });
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendBtn.click();
+      }
+    });
+
+    doneBtn.addEventListener('click', () => {
+      if (wizardBusy) return;
+      // Tell the agent we're done
+      sendWizardTurn("I'm satisfied with what we've discussed. Please produce the final summary.");
+    });
+
+    // Scroll to bottom
+    const chat = document.getElementById('wizardChat');
+    if (chat) chat.scrollTop = chat.scrollHeight;
+  }
+
+  async function sendWizardTurn(userText) {
+    wizardBusy = true;
+    const chat = document.getElementById('wizardChat');
+    const statusEl = document.getElementById('wizardStatus');
+    const sendBtn = document.getElementById('wizardSendBtn');
+    const doneBtn = document.getElementById('wizardDoneBtn');
+
+    if (sendBtn) sendBtn.disabled = true;
+    if (statusEl) statusEl.textContent = 'Guide is thinking...';
+
+    // Add user message to conversation (if not the initial kick-off)
+    if (userText !== null) {
+      wizardConversation.push({ role: 'user', content: userText });
+      if (chat) {
+        chat.insertAdjacentHTML('beforeend', chatBubble('user', userText));
+        chat.scrollTop = chat.scrollHeight;
+      }
+    }
+
+    try {
+      // Build message array for the LLM
+      const messages = wizardConversation.map(m => ({ role: m.role, content: m.content }));
+
+      const response = await agents.runInterviewerTurn(messages, wizardProjectId);
+
+      // Check if the response is the final structured JSON
+      let parsed = null;
+      try {
+        parsed = JSON.parse(response.trim());
+      } catch (_) {}
+
+      if (parsed && parsed.complete === true) {
+        // Interview is done — save intake data and start the pipeline
+        wizardConversation.push({ role: 'assistant', content: response });
+        const intake = {
+          topic: parsed.topic || '(untitled)',
+          audience: parsed.audience || '',
+          tone: parsed.tone || '',
+          mustHaves: parsed.mustHaves || '',
+          avoid: parsed.avoid || '',
+          additionalContext: parsed.additionalContext || '',
+          rawConversation: wizardConversation
+        };
+        const project = store.loadProject(wizardProjectId);
+        project.intake = intake;
+        store.saveProject(project);
+        currentProject = project;
+
+        // Show a completion message before transitioning
+        if (chat) {
+          chat.insertAdjacentHTML('beforeend', chatBubble('assistant', `Got it! I have everything I need to build your GPT about "${esc(parsed.topic)}". Starting the pipeline now...`));
+          chat.scrollTop = chat.scrollHeight;
+        }
+
+        // Brief pause so user can read the message
+        await new Promise(r => setTimeout(r, 1500));
+
+        // Start the pipeline
+        pipeline.beginAfterIntake();
+        return;
+      }
+
+      // Normal conversational response
+      wizardConversation.push({ role: 'assistant', content: response });
+      if (chat) {
+        chat.insertAdjacentHTML('beforeend', chatBubble('assistant', response));
+        chat.scrollTop = chat.scrollHeight;
+      }
+
+      // Save conversation progress
+      const project = store.loadProject(wizardProjectId);
+      if (project) {
+        project.intake = project.intake || {};
+        project.intake.rawConversation = wizardConversation;
+        store.saveProject(project);
+      }
+
+      // Show "done" button after 2+ user messages
+      if (doneBtn && wizardConversation.filter(m => m.role === 'user').length >= 2) {
+        doneBtn.classList.remove('hidden');
+      }
+
+    } catch (e) {
+      if (chat) {
+        chat.insertAdjacentHTML('beforeend',
+          `<div class="fade-in text-center text-sm text-red-500 py-2">Error: ${esc(e.message)}. Please try again.</div>`
+        );
+      }
+    }
+
+    wizardBusy = false;
+    if (sendBtn) sendBtn.disabled = false;
+    if (statusEl) statusEl.textContent = '';
+  }
+
+  function chatBubble(role, content) {
+    if (role === 'user') {
+      return `<div class="flex justify-end fade-in">
+        <div class="chat-bubble-user px-4 py-2 max-w-[80%] text-sm">${esc(content)}</div>
+      </div>`;
+    }
+    return `<div class="flex justify-start gap-2 fade-in">
+      <div class="agent-avatar bg-teal-100 flex-shrink-0 text-sm">\uD83D\uDDE3\uFE0F</div>
+      <div class="chat-bubble-assistant px-4 py-2 max-w-[80%] text-sm">${esc(content)}</div>
+    </div>`;
   }
 
   // Chunk 3: Progress view
